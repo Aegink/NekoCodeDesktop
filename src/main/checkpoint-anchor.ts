@@ -80,3 +80,24 @@ export function cellIdForMessage(
 	const timestamp = typeof message.timestamp === "number" ? message.timestamp : 0;
 	return `user-${timestamp}-${index}`;
 }
+
+/**
+ * The session entry behind a reply's transcript cell — the inverse of
+ * `cellIdForMessage` for the model's side, and by the same identity: the cell id
+ * carries the message's index in the context, and the entry holds that very
+ * message object.
+ *
+ * Null for anything that is not a reply cell, and for a reply no longer on the
+ * branch (compacted away, or left behind), which has no path to copy.
+ */
+export function replyEntry(
+	branch: readonly AnchorEntry[],
+	messages: readonly AnchorMessage[],
+	cellId: string,
+): AnchorEntry | null {
+	const match = /^assistant-\d+-(\d+)$/.exec(cellId);
+	if (!match) return null;
+	const message = messages[Number(match[1])];
+	if (!message || message.role !== "assistant") return null;
+	return branch.find((entry) => entry.type === "message" && entry.message === message) ?? null;
+}

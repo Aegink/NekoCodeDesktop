@@ -1,6 +1,14 @@
-import type { FastContextConfig } from "../shared/fast-context";
 import type { FusionConfig } from "../shared/fusion";
 import type { LanStatus } from "../shared/lan";
+import type { SshHostInput, SshStatus, SshTestResult } from "../shared/ssh";
+import type {
+	DesktopAction,
+	DesktopController,
+	DesktopFrame,
+	DesktopKeyInput,
+	DesktopPointerInput,
+	DesktopState,
+} from "../shared/remote-desktop";
 import type { AppVersionInfo, UpdateCheckResult } from "../shared/updates";
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { DEFAULT_SHELL_INFO, type ShellInfo, type WindowMaterial } from "../shared/window";
@@ -13,6 +21,7 @@ import type {
 	SetPluginEnabledRequest,
 } from "../shared/plugins";
 import type { WorkMode, WorkflowAnswer } from "../shared/workflow";
+import type { TaskBoardEntry } from "../shared/task-board";
 import type { AutomationEvent, AutomationRun, AutomationWithState, SaveAutomationRequest } from "../shared/automation";
 import type { BrowserPopupRequest, BrowserPreviewRequest, BrowserElementSelection } from "../shared/browser";
 import type {
@@ -29,6 +38,7 @@ import type {
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ForkSessionRequest,
 	OpenSessionRequest,
 	RenameSessionRequest,
 	SendPromptRequest,
@@ -45,6 +55,17 @@ import type { GoalAction } from "../shared/goal";
 import type { ProjectInstructions, SaveInstructionsRequest } from "../shared/instructions";
 import type { MemorySnapshot, SaveMemoryRequest } from "../shared/memory";
 import type { HooksSnapshot, SaveHookRequest } from "../shared/hooks";
+import type {
+	IdeCreateRequest,
+	IdeReadResult,
+	IdeRenameRequest,
+	IdeSearchRequest,
+	IdeSearchResult,
+	IdeStatEntry,
+	IdeWriteRequest,
+	IdeWriteResult,
+} from "../shared/ide";
+import type { IdeExtensionSearchResult, IdeExtensionsSnapshot } from "../shared/ide-extensions";
 import type {
 	CreateSkillRequest,
 	ImportSkillsRequest,
@@ -122,6 +143,7 @@ import type {
 	ProxyStatus,
 	SaveModelProfileRequest,
 } from "../shared/settings";
+import type { WebToolsStatus, WebToolsUpdate } from "../shared/web-tools";
 
 function subscribe<T>(
 	channel: string,
@@ -199,6 +221,27 @@ const api = {
 		ipcRenderer.invoke("fs:list", cwd, relPath),
 	fsReadFile: (cwd: string, relPath: string): Promise<FsReadResult> =>
 		ipcRenderer.invoke("fs:readFile", cwd, relPath),
+	ideReadText: (cwd: string, relPath: string): Promise<IdeReadResult> =>
+		ipcRenderer.invoke("ide:readText", cwd, relPath),
+	ideWriteText: (request: IdeWriteRequest): Promise<IdeWriteResult> => ipcRenderer.invoke("ide:writeText", request),
+	ideCreate: (request: IdeCreateRequest): Promise<string> => ipcRenderer.invoke("ide:create", request),
+	ideRename: (request: IdeRenameRequest): Promise<string> => ipcRenderer.invoke("ide:rename", request),
+	ideDelete: (cwd: string, relPath: string): Promise<void> => ipcRenderer.invoke("ide:delete", cwd, relPath),
+	ideStat: (cwd: string, relPaths: string[]): Promise<IdeStatEntry[]> => ipcRenderer.invoke("ide:stat", cwd, relPaths),
+	ideQuickOpen: (cwd: string, query: string): Promise<string[]> => ipcRenderer.invoke("ide:quickOpen", cwd, query),
+	ideSearch: (request: IdeSearchRequest): Promise<IdeSearchResult> => ipcRenderer.invoke("ide:search", request),
+	ideGitHead: (cwd: string, relPath: string): Promise<string | null> => ipcRenderer.invoke("ide:gitHead", cwd, relPath),
+	ideGitCommit: (cwd: string, message: string, all: boolean): Promise<void> =>
+		ipcRenderer.invoke("ide:gitCommit", cwd, message, all),
+	ideExtensionsList: (locale: string): Promise<IdeExtensionsSnapshot> => ipcRenderer.invoke("ideExt:list", locale),
+	ideExtensionsSearch: (query: string): Promise<IdeExtensionSearchResult> => ipcRenderer.invoke("ideExt:search", query),
+	ideExtensionsInstall: (id: string): Promise<IdeExtensionsSnapshot> => ipcRenderer.invoke("ideExt:install", id),
+	ideExtensionsInstallVsix: (): Promise<IdeExtensionsSnapshot | null> => ipcRenderer.invoke("ideExt:installVsix"),
+	ideExtensionsUninstall: (id: string): Promise<IdeExtensionsSnapshot> => ipcRenderer.invoke("ideExt:uninstall", id),
+	ideExtensionsSetEnabled: (id: string, enabled: boolean): Promise<IdeExtensionsSnapshot> =>
+		ipcRenderer.invoke("ideExt:setEnabled", id, enabled),
+	ideExtensionsReadFile: (id: string, relPath: string): Promise<string> => ipcRenderer.invoke("ideExt:readFile", id, relPath),
+	ideExtensionsOniguruma: (): Promise<Uint8Array> => ipcRenderer.invoke("ideExt:oniguruma"),
 	pickDirectory: () => ipcRenderer.invoke("dialog:openDirectory"),
 	directoryList: (path: string): Promise<HostDirectoryListing> =>
 		ipcRenderer.invoke("directory:list", path),
@@ -237,6 +280,12 @@ const api = {
 		ipcRenderer.invoke("agent:create", cwd),
 	agentOpen: (req: OpenSessionRequest): Promise<AgentSnapshot> =>
 		ipcRenderer.invoke("agent:open", req),
+	agentFork: (req: ForkSessionRequest): Promise<AgentSnapshot | null> =>
+		ipcRenderer.invoke("agent:fork", req),
+	agentWatchPanes: (reqs: OpenSessionRequest[]): Promise<AgentSnapshot[]> =>
+		ipcRenderer.invoke("agent:watchPanes", reqs),
+	onAgentPaneSnapshot: (listener: (snapshot: AgentSnapshot) => void) =>
+		subscribe("agent:paneSnapshot", listener),
 	agentSnapshot: (): Promise<AgentSnapshot | null> =>
 		ipcRenderer.invoke("agent:snapshot"),
 	agentLoadEarlier: (): Promise<AgentSnapshot | null> =>
@@ -250,6 +299,10 @@ const api = {
 	/** A finished task's notification was clicked: bring that session up. */
 	onRevealSession: (listener: (session: SessionSummary) => void) =>
 		subscribe("agent:revealSession", listener),
+	agentTasks: (): Promise<TaskBoardEntry[]> => ipcRenderer.invoke("agent:tasks"),
+	onAgentTasks: (listener: (entries: TaskBoardEntry[]) => void) => subscribe("agent:tasks", listener),
+	agentAbortTask: (sessionId: string): Promise<void> => ipcRenderer.invoke("agent:abortTask", sessionId),
+	agentDismissTasks: (sessionIds: string[]): Promise<void> => ipcRenderer.invoke("agent:dismissTasks", sessionIds),
 	preferencesGet: (): Promise<AppPreferences> => ipcRenderer.invoke("preferences:get"),
 	preferencesUpdate: (patch: Partial<AppPreferences>): Promise<AppPreferences> =>
 		ipcRenderer.invoke("preferences:update", patch),
@@ -308,8 +361,6 @@ const api = {
 	// and pushed back through onAgentDefaults.
 	agentSetFusion: (config: FusionConfig): Promise<AgentSnapshot | null> =>
 		ipcRenderer.invoke("agent:setFusion", config),
-	agentSetFastContext: (config: FastContextConfig): Promise<AgentSnapshot | null> =>
-		ipcRenderer.invoke("agent:setFastContext", config),
 	agentSetModel: (modelKey: string): Promise<AgentSnapshot | null> =>
 		ipcRenderer.invoke("agent:setModel", modelKey),
 	agentSetThinking: (level: ThinkingLevel): Promise<AgentSnapshot | null> =>
@@ -386,6 +437,9 @@ const api = {
 
 	proxyStatus: (): Promise<ProxyStatus> => ipcRenderer.invoke("settings:proxyStatus"),
 	proxySave: (manual: string | null): Promise<ProxyStatus> => ipcRenderer.invoke("settings:saveProxy", manual),
+	webToolsStatus: (): Promise<WebToolsStatus> => ipcRenderer.invoke("settings:webToolsStatus"),
+	webToolsSave: (patch: WebToolsUpdate): Promise<WebToolsStatus> => ipcRenderer.invoke("settings:saveWebTools", patch),
+	webFavicon: (url: string): Promise<string | null> => ipcRenderer.invoke("web:favicon", url),
 
 	oauthList: (): Promise<OAuthProviderSummary[]> => ipcRenderer.invoke("oauth:list"),
 	oauthRefresh: (id: OAuthProviderId): Promise<OAuthProviderSummary> => ipcRenderer.invoke("oauth:refresh", id),
@@ -404,6 +458,25 @@ const api = {
 	githubSave: (token: string): Promise<GitHubAuthStatus> =>
 		ipcRenderer.invoke("github:save", token),
 	githubClear: (): Promise<GitHubAuthStatus> => ipcRenderer.invoke("github:clear"),
+
+	sshStatus: (): Promise<SshStatus> => ipcRenderer.invoke("ssh:status"),
+	sshSave: (input: SshHostInput): Promise<SshStatus> => ipcRenderer.invoke("ssh:save", input),
+	sshRemove: (id: string): Promise<SshStatus> => ipcRenderer.invoke("ssh:remove", id),
+	sshTest: (id: string): Promise<SshTestResult> => ipcRenderer.invoke("ssh:test", id),
+	sshForgetHostKey: (id: string): Promise<SshStatus> => ipcRenderer.invoke("ssh:forgetHostKey", id),
+	sshChooseKey: (): Promise<string | null> => ipcRenderer.invoke("ssh:chooseKey"),
+
+	desktopStates: (): Promise<DesktopState[]> => ipcRenderer.invoke("desktop:states"),
+	desktopConnect: (hostId: string): Promise<DesktopState> => ipcRenderer.invoke("desktop:connect", hostId),
+	desktopDisconnect: (hostId: string): Promise<void> => ipcRenderer.invoke("desktop:disconnect", hostId),
+	desktopSetController: (hostId: string, controller: DesktopController): Promise<DesktopState> =>
+		ipcRenderer.invoke("desktop:setController", hostId, controller),
+	desktopWatch: (hostId: string, watching: boolean): Promise<void> => ipcRenderer.invoke("desktop:watch", hostId, watching),
+	desktopPointer: (input: DesktopPointerInput): void => ipcRenderer.send("desktop:pointer", input),
+	desktopKey: (input: DesktopKeyInput): void => ipcRenderer.send("desktop:key", input),
+	onDesktopState: (listener: (states: DesktopState[]) => void) => subscribe("desktop:state", listener),
+	onDesktopFrame: (listener: (frame: DesktopFrame) => void) => subscribe("desktop:frame", listener),
+	onDesktopAction: (listener: (action: DesktopAction) => void) => subscribe("desktop:action", listener),
 
 	prList: (cwd: string, filter: PullRequestFilter): Promise<PullRequestListResult> =>
 		ipcRenderer.invoke("pr:list", cwd, filter),

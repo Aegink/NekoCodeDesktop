@@ -1,6 +1,14 @@
-import type { FastContextConfig } from "../../shared/fast-context";
 import type { FusionConfig } from "../../shared/fusion";
 import type { LanStatus } from "../../shared/lan";
+import type { SshHostInput, SshStatus, SshTestResult } from "../../shared/ssh";
+import type {
+	DesktopAction,
+	DesktopController,
+	DesktopFrame,
+	DesktopKeyInput,
+	DesktopPointerInput,
+	DesktopState,
+} from "../../shared/remote-desktop";
 import type { AppVersionInfo, UpdateCheckResult } from "../../shared/updates";
 import type {
 	InstallPluginRequest,
@@ -11,11 +19,13 @@ import type {
 	SetPluginEnabledRequest,
 } from "../../shared/plugins";
 import type { WorkMode, WorkflowAnswer } from "../../shared/workflow";
+import type { TaskBoardEntry } from "../../shared/task-board";
 import type {
 	AgentDefaults,
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ForkSessionRequest,
 	OpenSessionRequest,
 	RenameSessionRequest,
 	SendPromptRequest,
@@ -70,6 +80,7 @@ import type {
 	ProxyStatus,
 	SaveModelProfileRequest,
 } from "../../shared/settings";
+import type { WebToolsStatus, WebToolsUpdate } from "../../shared/web-tools";
 import type {
 	TerminalCreateRequest,
 	TerminalExit,
@@ -79,6 +90,17 @@ import type {
 	TerminalSession,
 } from "../../shared/terminal";
 import type { SlashCommandSummary } from "../../shared/commands";
+import type {
+	IdeCreateRequest,
+	IdeReadResult,
+	IdeRenameRequest,
+	IdeSearchRequest,
+	IdeSearchResult,
+	IdeStatEntry,
+	IdeWriteRequest,
+	IdeWriteResult,
+} from "../../shared/ide";
+import type { IdeExtensionSearchResult, IdeExtensionsSnapshot } from "../../shared/ide-extensions";
 import type {
 	CreateSkillRequest,
 	ImportSkillsRequest,
@@ -182,6 +204,38 @@ export interface AgentApi {
 	fsList(cwd: string, relPath: string): Promise<FsEntry[]>;
 	fsReadFile(cwd: string, relPath: string): Promise<FsReadResult>;
 
+	/** The whole file for the IDE editor, with the mtime a save is checked against. */
+	ideReadText(cwd: string, relPath: string): Promise<IdeReadResult>;
+	/** Saves an editor buffer; refused as a conflict when the file moved on since it was read. */
+	ideWriteText(request: IdeWriteRequest): Promise<IdeWriteResult>;
+	ideCreate(request: IdeCreateRequest): Promise<string>;
+	ideRename(request: IdeRenameRequest): Promise<string>;
+	/** Moves a file or folder to the recycle bin. */
+	ideDelete(cwd: string, relPath: string): Promise<void>;
+	ideStat(cwd: string, relPaths: string[]): Promise<IdeStatEntry[]>;
+	/** Project files ranked against a fuzzy query, for Ctrl+P. */
+	ideQuickOpen(cwd: string, query: string): Promise<string[]>;
+	ideSearch(request: IdeSearchRequest): Promise<IdeSearchResult>;
+	/** The file as committed at HEAD, or null when it is not there. */
+	ideGitHead(cwd: string, relPath: string): Promise<string | null>;
+	/** Commits the staged changes, or with `all` every change. */
+	ideGitCommit(cwd: string, message: string, all: boolean): Promise<void>;
+
+	/** Installed IDE extensions, described in `locale` where they ship translations. */
+	ideExtensionsList(locale: string): Promise<IdeExtensionsSnapshot>;
+	/** Open VSX search; an empty query lists the most installed. */
+	ideExtensionsSearch(query: string): Promise<IdeExtensionSearchResult>;
+	/** Downloads the latest version from Open VSX and installs it. */
+	ideExtensionsInstall(id: string): Promise<IdeExtensionsSnapshot>;
+	/** Picks a `.vsix` from disk and installs it; null when the dialog is cancelled. */
+	ideExtensionsInstallVsix(): Promise<IdeExtensionsSnapshot | null>;
+	ideExtensionsUninstall(id: string): Promise<IdeExtensionsSnapshot>;
+	ideExtensionsSetEnabled(id: string, enabled: boolean): Promise<IdeExtensionsSnapshot>;
+	/** A text file an installed extension contributes: a theme, grammar, snippet file. */
+	ideExtensionsReadFile(id: string, relPath: string): Promise<string>;
+	/** The Oniguruma regex engine (wasm) that TextMate grammars run on. */
+	ideExtensionsOniguruma(): Promise<Uint8Array>;
+
 	sessionList(cwd?: string): Promise<SessionSummary[]>;
 	sessionRename(req: RenameSessionRequest): Promise<void>;
 	sessionDelete(req: DeleteSessionRequest): Promise<void>;
@@ -189,6 +243,15 @@ export interface AgentApi {
 
 	agentCreate(cwd: string): Promise<AgentSnapshot>;
 	agentOpen(req: OpenSessionRequest): Promise<AgentSnapshot>;
+	/** Branch the open conversation at a reply into a new session, and open that. */
+	agentFork(req: ForkSessionRequest): Promise<AgentSnapshot | null>;
+	/**
+	 * The sessions shown side by side in the split view, besides the selected
+	 * one. Each keeps sending its snapshots through {@link onAgentPaneSnapshot}
+	 * until a later call leaves it out. Desktop only.
+	 */
+	agentWatchPanes(reqs: OpenSessionRequest[]): Promise<AgentSnapshot[]>;
+	onAgentPaneSnapshot(listener: (snapshot: AgentSnapshot) => void): () => void;
 	agentSnapshot(): Promise<AgentSnapshot | null>;
 	/**
 	 * Reach one page further back into the open session. The window is only
@@ -202,6 +265,14 @@ export interface AgentApi {
 	agentStartBackground(req: StartBackgroundTaskRequest): Promise<StartBackgroundTaskResult>;
 	/** A finished task's notification was clicked: bring that session up. */
 	onRevealSession(listener: (session: SessionSummary) => void): () => void;
+	/** Every task that has run since the app started; see the task board. */
+	agentTasks(): Promise<TaskBoardEntry[]>;
+	/** The board changed — a task moved on, started, stopped or was dismissed. */
+	onAgentTasks(listener: (entries: TaskBoardEntry[]) => void): () => void;
+	/** Stop one task, whether or not it is the session on screen. */
+	agentAbortTask(sessionId: string): Promise<void>;
+	/** Take finished tasks off the board; their sessions stay in the sidebar. */
+	agentDismissTasks(sessionIds: string[]): Promise<void>;
 	preferencesGet(): Promise<AppPreferences>;
 	preferencesUpdate(patch: Partial<AppPreferences>): Promise<AppPreferences>;
 	/** The command shells this platform offers, and where each is installed. */
@@ -270,7 +341,6 @@ export interface AgentApi {
 	onAgentDefaults(listener: (defaults: AgentDefaults) => void): () => void;
 	/** Null without a session: the pick becomes the welcome screen's default. */
 	agentSetFusion(config: FusionConfig): Promise<AgentSnapshot | null>;
-	agentSetFastContext(config: FastContextConfig): Promise<AgentSnapshot | null>;
 	agentSetModel(modelKey: string): Promise<AgentSnapshot | null>;
 	agentSetThinking(level: ThinkingLevel): Promise<AgentSnapshot | null>;
 	agentSetMode(mode: ExecutionMode): Promise<AgentSnapshot | null>;
@@ -331,6 +401,10 @@ export interface AgentApi {
 
 	proxyStatus(): Promise<ProxyStatus>;
 	proxySave(manual: string | null): Promise<ProxyStatus>;
+	webToolsStatus(): Promise<WebToolsStatus>;
+	webToolsSave(patch: WebToolsUpdate): Promise<WebToolsStatus>;
+	/** A data URL for a site's icon, fetched by main; null when there is none. */
+	webFavicon(url: string): Promise<string | null>;
 
 	oauthList(): Promise<OAuthProviderSummary[]>;
 	oauthRefresh(id: OAuthProviderId): Promise<OAuthProviderSummary>;
@@ -345,6 +419,27 @@ export interface AgentApi {
 	githubStatus(): Promise<GitHubAuthStatus>;
 	githubSave(token: string): Promise<GitHubAuthStatus>;
 	githubClear(): Promise<GitHubAuthStatus>;
+
+	sshStatus(): Promise<SshStatus>;
+	sshSave(input: SshHostInput): Promise<SshStatus>;
+	sshRemove(id: string): Promise<SshStatus>;
+	/** Connect, probe the system, and pin the host key on first use. */
+	sshTest(id: string): Promise<SshTestResult>;
+	sshForgetHostKey(id: string): Promise<SshStatus>;
+	sshChooseKey(): Promise<string | null>;
+
+	desktopStates(): Promise<DesktopState[]>;
+	/** Open a saved host's remote desktop with the user in control. */
+	desktopConnect(hostId: string): Promise<DesktopState>;
+	desktopDisconnect(hostId: string): Promise<void>;
+	desktopSetController(hostId: string, controller: DesktopController): Promise<DesktopState>;
+	/** Frames are sent only while a panel watches. */
+	desktopWatch(hostId: string, watching: boolean): Promise<void>;
+	desktopPointer(input: DesktopPointerInput): void;
+	desktopKey(input: DesktopKeyInput): void;
+	onDesktopState(listener: (states: DesktopState[]) => void): () => void;
+	onDesktopFrame(listener: (frame: DesktopFrame) => void): () => void;
+	onDesktopAction(listener: (action: DesktopAction) => void): () => void;
 
 	prList(cwd: string, filter: PullRequestFilter): Promise<PullRequestListResult>;
 	prDetail(cwd: string, number: number): Promise<PullRequestDetail>;

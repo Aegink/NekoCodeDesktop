@@ -26,7 +26,8 @@ export interface BrowserPreviewRequest {
 	sessionId: string;
 	cwd: string;
 	url: string;
-	kind: "html" | "server" | "automation";
+	/** `link`: a link the user clicked in an answer. */
+	kind: "html" | "server" | "automation" | "link";
 }
 
 export interface BrowserElementSelection {

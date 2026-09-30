@@ -1,7 +1,6 @@
 import type { ComposerInsertion } from "../../../shared/browser";
 import type { SlashCommandSummary } from "../../../shared/commands";
 import type { MentionCandidate } from "../../../shared/mentions";
-import type { FastContextConfig } from "../../../shared/fast-context";
 import type { FusionConfig } from "../../../shared/fusion";
 import type { WorkMode } from "../../../shared/workflow";
 import type { AgentDefaults, ExecutionMode, SendPromptRequest, ThinkingLevel } from "../../../shared/agent";
@@ -29,7 +28,6 @@ interface WelcomeViewProps {
 	allowImageAttachments?: boolean;
 	onDismissError: () => void;
 	onSetFusion: (config: FusionConfig) => void;
-	onSetFastContext: (config: FastContextConfig) => void;
 	onSetModel: (modelKey: string) => void;
 	onSetThinking: (level: ThinkingLevel) => void;
 	onSetMode: (mode: ExecutionMode) => void;
@@ -95,7 +93,6 @@ export function WelcomeView(props: WelcomeViewProps) {
 							<ComposerPickers
 								models={defaults.models}
 								modelKey={defaults.modelKey}
-								fastContext={defaults.fastContext}
 								fusion={defaults.fusion}
 								thinkingLevel={defaults.thinkingLevel}
 								thinkingLevels={defaults.thinkingLevels}
@@ -104,7 +101,6 @@ export function WelcomeView(props: WelcomeViewProps) {
 								agentPhase={defaults.agentPhase}
 								disabled={busy}
 								onSetFusion={props.onSetFusion}
-								onSetFastContext={props.onSetFastContext}
 								onSetModel={props.onSetModel}
 								onSetThinking={props.onSetThinking}
 								onSetMode={props.onSetMode}

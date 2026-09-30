@@ -404,6 +404,208 @@
   }
 }
 
+/* Fast Context card (code_search). While the explorer runs: a scan line crosses
+   the card's top edge, the bolt flickers, each parallel call pops in as a chip
+   and a chip still out carries a light sweep. Transform/opacity/background only. */
+@keyframes fast-context-scan {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+
+.fast-context-scan::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1.5px;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-token-text-link-foreground),
+    transparent
+  );
+  animation: fast-context-scan 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+}
+
+@keyframes fast-context-bolt {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 0 transparent); }
+  45% { opacity: 0.55; }
+  55% { opacity: 1; filter: drop-shadow(0 0 3px var(--color-token-text-link-foreground)); }
+}
+
+.fast-context-bolt {
+  animation: fast-context-bolt 1.1s ease-in-out infinite;
+}
+
+@keyframes fast-context-pop {
+  from { opacity: 0; transform: translateY(3px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+.fast-context-pop {
+  animation: fast-context-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes fast-context-live {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+
+.fast-context-live {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-token-text-link-foreground) 18%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation:
+    fast-context-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    fast-context-live 1.1s linear infinite;
+}
+
+/* Older turns scroll up behind a fade rather than being cut off. */
+.fast-context-fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0, black 1.25rem);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fast-context-scan::before,
+  .fast-context-bolt,
+  .fast-context-pop,
+  .fast-context-live {
+    animation: none;
+  }
+}
+
+/* Tool calls (chat/ToolCalls.tsx). One motion language with the Fast Context
+   card, whose keyframes these reuse: a row or card arriving in a live run rises
+   in; a card still working carries the scan line along its top edge; a step
+   still out carries the light sweep; a glyph that just finished settles; a
+   running command shows a caret where its next line lands. History renders
+   still — only a live turn animates. Transform/opacity/background only. */
+@keyframes tool-enter {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tool-enter {
+  animation: tool-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.tool-scan::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: 0;
+  height: 1.5px;
+  width: 40%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-token-text-link-foreground),
+    transparent
+  );
+  animation: fast-context-scan 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  pointer-events: none;
+}
+
+.tool-pop {
+  animation: fast-context-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+.tool-live {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--color-token-text-link-foreground) 18%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation:
+    fast-context-pop 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    fast-context-live 1.1s linear infinite;
+}
+
+@keyframes tool-settle {
+  0% { opacity: 0.2; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.12); }
+  100% { opacity: 1; transform: none; }
+}
+
+.tool-settle {
+  animation: tool-settle 280ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+@keyframes tool-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.8; }
+}
+
+.tool-breathe {
+  animation: tool-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes tool-expand {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+
+.tool-expand {
+  animation: tool-expand 160ms ease-out both;
+}
+
+@keyframes tool-caret {
+  0%, 49% { opacity: 0.7; }
+  50%, 100% { opacity: 0; }
+}
+
+.tool-caret {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentColor;
+  animation: tool-caret 1s steps(1) infinite;
+}
+
+.tool-fade-top {
+  mask-image: linear-gradient(to bottom, transparent 0, black 1.5rem);
+}
+
+/* The chevron waits for the pointer, Codex-style, and turns as the call opens. */
+.tool-line .tool-chevron {
+  opacity: 0;
+  transition: opacity 120ms ease, transform 160ms ease;
+}
+
+.tool-line:hover .tool-chevron,
+.tool-line:focus-visible .tool-chevron,
+.tool-line[aria-expanded="true"] .tool-chevron {
+  opacity: 1;
+}
+
+.tool-line[aria-expanded="true"] .tool-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-enter,
+  .tool-scan::before,
+  .tool-pop,
+  .tool-live,
+  .tool-settle,
+  .tool-breathe,
+  .tool-expand,
+  .tool-caret {
+    animation: none;
+  }
+}
+
 /* Subtle send affordance for newly inserted user bubbles. Transform/opacity only,
    so the transcript can stay lightweight while the row appears less abruptly. */
 @keyframes chat-message-send-enter {
@@ -825,6 +1027,19 @@ label:has(> select#reasoning-effort) select {
 }
 
 /* Chat markdown rendering */
+
+/* Prose sits on the app's type scale, one step above the chrome around it —
+   tool rows and headers at --app-font-size-chat, meta below that. Without a size
+   of its own it inherited the browser's 16px and towered over everything else in
+   the transcript. In the components layer so a utility on a particular use
+   (release notes, a report inside a card) still sets its own size. */
+@layer components {
+  .chat-markdown {
+    font-size: var(--app-font-size-chat-body, 13px);
+    line-height: 1.65;
+  }
+}
+
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -909,41 +1124,39 @@ label:has(> select#reasoning-effort) select {
 }
 
 /* Headings: restore visual hierarchy that Tailwind preflight flattens.
-   Keep sizes compact so assistant replies remain scannable. */
+   A reply is not a document — Codex/Cursor-style, headings lead with weight and
+   only a small step in size, so an "## Summary" does not outshout the answer. */
 .chat-markdown h1,
 .chat-markdown h2,
 .chat-markdown h3,
 .chat-markdown h4,
 .chat-markdown h5,
 .chat-markdown h6 {
-  margin: 1.1em 0 0.35em;
+  margin: 1.25em 0 0.4em;
   font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
+  line-height: 1.35;
+  letter-spacing: -0.005em;
 }
 
 .chat-markdown h1 {
-  font-size: 1.75em;
+  font-size: 1.3em;
 }
 
 .chat-markdown h2 {
-  font-size: 1.55em;
+  font-size: 1.18em;
 }
 
 .chat-markdown h3 {
-  font-size: 1.35em;
+  font-size: 1.08em;
 }
 
-.chat-markdown h4 {
-  font-size: 1.2em;
-}
-
+.chat-markdown h4,
 .chat-markdown h5 {
-  font-size: 1.1em;
+  font-size: 1em;
 }
 
 .chat-markdown h6 {
-  font-size: 1em;
+  font-size: 0.92em;
   color: var(--muted-foreground);
 }
 
@@ -966,6 +1179,103 @@ label:has(> select#reasoning-effort) select {
   text-decoration: underline;
   text-decoration-thickness: from-font;
   text-underline-offset: 0.18em;
+}
+
+/* Agent map: a slow pulse behind a node that is working, and the tree lines
+   that hang subagents off the main agent — a trunk down the left edge and a
+   short branch into each card. */
+@keyframes agent-map-pulse {
+  0% { transform: scale(1); opacity: 0.55; }
+  70%, 100% { transform: scale(2.4); opacity: 0; }
+}
+
+.agent-map-pulse {
+  animation: agent-map-pulse 1.6s ease-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-map-pulse { animation: none; opacity: 0.35; }
+}
+
+.agent-map-tree {
+  position: relative;
+  margin-left: 0.75rem;
+  padding-left: 0.875rem;
+}
+
+.agent-map-tree::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -0.5rem;
+  bottom: 1.25rem;
+  border-left: 1px solid var(--app-surface-divider);
+}
+
+.agent-map-branch {
+  position: relative;
+}
+
+.agent-map-branch::before {
+  content: "";
+  position: absolute;
+  left: -0.875rem;
+  top: 1.2rem;
+  width: 0.875rem;
+  border-top: 1px solid var(--app-surface-divider);
+}
+
+/* Web citations: a superscript number that opens its source, and a bare URL
+   shown as the page it names. Both sit inside running prose, so they stay
+   the height of the line around them. */
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35em;
+  height: 1.35em;
+  margin: 0 0.1em;
+  padding: 0 0.3em;
+  border-radius: 0.45em;
+  vertical-align: super;
+  font-size: 0.68em;
+  font-weight: 500;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-token-text-link-foreground);
+  background: color-mix(in srgb, var(--color-token-text-link-foreground) 12%, transparent);
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.citation-badge:hover,
+.citation-badge:focus-visible {
+  background: color-mix(in srgb, var(--color-token-text-link-foreground) 22%, transparent);
+}
+
+.citation-badge--static {
+  vertical-align: baseline;
+  font-size: var(--app-font-size-chat-meta, 10px);
+  cursor: inherit;
+}
+
+.source-chip {
+  display: inline-flex;
+  max-width: 22em;
+  align-items: center;
+  gap: 0.3em;
+  padding: 0.05em 0.45em;
+  border-radius: 0.45em;
+  vertical-align: baseline;
+  font-size: 0.92em;
+  color: var(--color-token-text-link-foreground);
+  background: color-mix(in srgb, var(--color-token-text-link-foreground) 9%, transparent);
+  cursor: pointer;
+}
+
+.source-chip:hover,
+.source-chip:focus-visible {
+  background: color-mix(in srgb, var(--color-token-text-link-foreground) 18%, transparent);
 }
 
 /* Find hits: yellow for every match, orange for the active one — dark text on
@@ -1007,7 +1317,8 @@ label:has(> select#reasoning-effort) select {
   background: var(--app-user-message-background);
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
-  font-size: var(--app-font-size-chat-code);
+  /* Relative, so code in a heading or a table keeps its proportion to the text. */
+  font-size: 0.88em;
   font-family: var(--font-chat-code-family);
 }
 
@@ -3181,4 +3492,154 @@ diffs-container {
 /* Expanded document panes retain a readable line length while using more space. */
 [data-dock-maximized="true"] .editor-markdown-preview__body {
   max-width: 1120px;
+}
+
+/* ─── IDE layout ─────────────────────────────────────────────────────────────── */
+
+/* The lines a Ctrl+K inline edit will hand to the agent. */
+.monaco-editor .ide-inline-edit-range {
+  background: color-mix(in srgb, var(--color-text-accent) 12%, transparent);
+}
+
+/* Monaco draws its own focus ring on the editor; the app's would double it. */
+.ide-layout .monaco-editor,
+.ide-layout .monaco-diff-editor {
+  outline: none;
+}
+
+/* A layer that is laid out but must not show or take clicks. `invisible` alone
+   is not enough: a descendant that declares `visibility: visible` — the browser
+   dock's panes, Monaco's diff editor (inline, on both of its sides) — overrides
+   an inherited `hidden` and goes on painting and catching clicks. `!important`
+   in a stylesheet outranks those declarations, inline ones included. */
+.layout-hidden,
+.layout-hidden * {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+/* ─── Split chat area ──────────────────────────────────────────────────────────
+   Up to four conversations side by side (SplitGrid). One pane fills the area
+   edge to edge exactly as the single chat always has; from two on, the area
+   takes the chrome tint and each pane becomes a card on it, the focused one
+   ringed in the accent. The snap preview borrows Windows 11's: an accent-tinted
+   acrylic rectangle that glides between zones on the same curve the panes use
+   to settle into them. */
+.split-grid {
+  --split-accent: var(--color-text-accent, var(--color-blue-500));
+  --split-ease: cubic-bezier(0.1, 0.9, 0.2, 1);
+  transition: background-color 240ms var(--split-ease);
+}
+
+.split-grid-split {
+  background: var(--app-sidebar-surface, var(--card));
+}
+
+.split-pane {
+  transform-origin: 0 0;
+  overflow: hidden;
+  background: var(--color-background-surface);
+  border-radius: 0;
+  box-shadow: 0 0 0 0 transparent;
+  transition:
+    border-radius 240ms var(--split-ease),
+    box-shadow 200ms ease-out,
+    opacity 200ms ease-out,
+    filter 200ms ease-out;
+}
+
+.split-grid-split > .split-pane {
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px var(--app-surface-divider),
+    0 2px 10px -4px color-mix(in srgb, var(--foreground) 10%, transparent);
+}
+
+.split-grid-split > .split-pane[data-focused] {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--split-accent) 55%, transparent),
+    0 0 0 4px color-mix(in srgb, var(--split-accent) 12%, transparent),
+    0 8px 28px -10px color-mix(in srgb, var(--foreground) 22%, transparent);
+}
+
+/* While a session is carried over the area the panes recede a little, so the
+   preview reads as the thing that is about to happen. */
+.split-grid[data-dragging] > .split-pane {
+  opacity: 0.72;
+  filter: saturate(0.85);
+}
+
+.split-snap-layer {
+  animation: split-snap-layer-in 160ms ease-out;
+}
+
+.split-snap-zone {
+  border-radius: 10px;
+  border: 1px dashed color-mix(in srgb, var(--split-accent) 30%, transparent);
+  background: color-mix(in srgb, var(--split-accent) 4%, transparent);
+  transition:
+    left 280ms var(--split-ease),
+    top 280ms var(--split-ease),
+    width 280ms var(--split-ease),
+    height 280ms var(--split-ease);
+}
+
+.split-snap-preview {
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--split-accent) 60%, transparent);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 0.10), rgb(255 255 255 / 0) 55%),
+    color-mix(in srgb, var(--split-accent) 18%, transparent);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.10),
+    0 12px 40px -12px color-mix(in srgb, var(--split-accent) 45%, transparent);
+  backdrop-filter: blur(20px) saturate(1.5);
+  animation: split-snap-preview-in 260ms var(--split-ease);
+  transition:
+    left 280ms var(--split-ease),
+    top 280ms var(--split-ease),
+    width 280ms var(--split-ease),
+    height 280ms var(--split-ease);
+}
+
+@keyframes split-snap-layer-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes split-snap-preview-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* The drag image: a title card rather than a ghost of the sidebar row. Laid out
+   off screen for the one frame the browser needs to capture it. */
+.split-drag-card {
+  position: fixed;
+  top: -1000px;
+  left: -1000px;
+  max-width: 240px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--foreground);
+  background: var(--popover, var(--card));
+  border: 1px solid color-mix(in srgb, var(--color-text-accent, #3b82f6) 45%, transparent);
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.35);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .split-grid,
+  .split-pane,
+  .split-snap-zone,
+  .split-snap-preview {
+    transition: none;
+  }
+  .split-snap-layer,
+  .split-snap-preview {
+    animation: none;
+  }
 }

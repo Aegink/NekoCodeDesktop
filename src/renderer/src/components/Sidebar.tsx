@@ -19,6 +19,7 @@ import {
 	GitBranchIcon,
 	GitPullRequestIcon,
 	GlobeIcon,
+	KanbanIcon,
 	MoonIcon,
 	NewThreadIcon,
 	SettingsIcon,
@@ -32,6 +33,7 @@ const SECONDARY_NAV: ReadonlyArray<{
 	labelKey: TranslationKey;
 	icon: typeof GitBranchIcon;
 }> = [
+	{ id: "tasks", labelKey: "nav.tasks", icon: KanbanIcon },
 	{ id: "review", labelKey: "nav.review", icon: GitBranchIcon },
 	{ id: "pull-requests", labelKey: "nav.pullRequests", icon: GitPullRequestIcon },
 	{ id: "automations", labelKey: "nav.automations", icon: WorkflowIcon },
@@ -46,8 +48,12 @@ interface SidebarProps {
 	workspaceName?: string;
 	/** An external agent's history: rows open, but cannot be renamed or deleted here. */
 	sessionsReadOnly?: boolean;
+	/** Rows can be dragged into the chat area to open side by side. */
+	sessionsDraggable?: boolean;
 	activeSessionId: string | null;
 	streaming: boolean;
+	/** Tasks on the board still running or waiting on the user; badges the 多任务 row. */
+	activeTasks?: number;
 	view: WorkspaceView;
 	busy: boolean;
 	theme: ThemeMode;
@@ -163,6 +169,12 @@ export function Sidebar(props: SidebarProps) {
 					>
 						<entry.icon className="size-3.5 shrink-0 opacity-80" />
 						<span className="min-w-0 flex-1 truncate">{t(entry.labelKey)}</span>
+						{entry.id === "tasks" && props.activeTasks ? (
+							<span className="flex items-center gap-1 text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground tabular-nums">
+								<span className="size-1.5 animate-pulse rounded-full bg-foreground/70" />
+								{props.activeTasks}
+							</span>
+						) : null}
 					</button>
 				))}
 				{api.runtime !== "web" ? (
@@ -202,6 +214,7 @@ export function Sidebar(props: SidebarProps) {
 				streaming={streaming}
 				caption={props.workspaceName}
 				readOnly={props.sessionsReadOnly}
+				draggable={props.sessionsDraggable}
 			/>
 
 			<div className="flex flex-col gap-1 px-2 pb-2 pt-1">

@@ -210,6 +210,32 @@ export async function listScopeFiles(
   }
 }
 
+/**
+ * A file as committed at HEAD — the original side of the editor's diff view.
+ * Null when there is no such file there: new, untracked, or no commits yet.
+ */
+export async function showHeadFile(cwd: string, relPath: string): Promise<string | null> {
+  const path = relPath.replace(/\\/g, "/").replace(/^\.\//, "");
+  try {
+    // `./` makes the path relative to cwd rather than the repository root.
+    return await git(cwd, ["show", `HEAD:./${path}`]);
+  } catch (error) {
+    if (error instanceof GitUnavailableError) throw error;
+    return null;
+  }
+}
+
+/**
+ * Commit what is staged — or, with `all`, everything, the way an editor's
+ * commit button does when nothing was staged first.
+ */
+export async function commitChanges(cwd: string, message: string, all: boolean): Promise<void> {
+  const text = message.trim();
+  if (!text) throw new Error("Commit message required");
+  if (all) await git(cwd, ["add", "-A"]);
+  await git(cwd, ["commit", "-m", text]);
+}
+
 export async function initRepo(cwd: string): Promise<void> {
   await git(cwd, ["init"]);
 }

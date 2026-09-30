@@ -153,6 +153,30 @@ export interface WorkflowTask {
 	steps: TaskStep[];
 }
 
+/**
+ * One run of the Fast Context explorer behind `code_search`.
+ *
+ * Live only, like a worker's steps: it exists so the agent map can show the
+ * explorer working while the parent waits on it, and a reopened session has
+ * nothing left to show. The report it returns is in the transcript.
+ */
+export interface ExplorerRun {
+	id: string;
+	/** What the parent asked it to find. */
+	query: string;
+	/** `provider/model` of the model doing the exploring. */
+	model?: string;
+	/** The `code_search` call that started it, so its transcript row can show it working. */
+	toolCallId?: string;
+	status: "running" | "completed" | "failed" | "cancelled";
+	startedAt: number;
+	endedAt?: number;
+	steps: TaskStep[];
+}
+
+/** Finished explorer runs kept for the map after they end. */
+export const MAX_FINISHED_EXPLORERS = 5;
+
 /** A task as it is written to the session file — see {@link TaskStep}. */
 export type SavedWorkflowTask = Omit<WorkflowTask, "steps">;
 export interface WorkflowSnapshot {
@@ -160,6 +184,8 @@ export interface WorkflowSnapshot {
 	request: WorkflowRequest | null;
 	todos: WorkflowTodo[];
 	tasks: WorkflowTask[];
+	/** Explorer runs of this session, running first; absent where nothing has explored. */
+	explorers?: ExplorerRun[];
 }
 export interface WorkflowSavedState {
 	version: 1;

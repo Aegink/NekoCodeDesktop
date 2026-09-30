@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { SlashCommandSummary } from "../../../shared/commands";
 import type { MentionCandidate } from "../../../shared/mentions";
 import type { ComposerInsertion } from "../../../shared/browser";
-import type { FastContextConfig } from "../../../shared/fast-context";
 import type { FusionConfig } from "../../../shared/fusion";
 import type { AgentPhase, WorkMode } from "../../../shared/workflow";
 import type { ContextUsage, ExecutionMode, ModelOption, SendPromptRequest, ThinkingLevel } from "../../../shared/agent";
@@ -19,7 +18,6 @@ interface ComposerProps {
 	streaming: boolean;
 	models: ModelOption[];
 	modelKey: string | null;
-	fastContext: FastContextConfig;
 	fusion?: FusionConfig | null;
 	thinkingLevel: ThinkingLevel;
 	thinkingLevels: ThinkingLevel[];
@@ -32,7 +30,6 @@ interface ComposerProps {
 	context?: ContextUsage;
 	onAbort: () => void;
 	onSetFusion: (config: FusionConfig) => void;
-	onSetFastContext: (config: FastContextConfig) => void;
 	onSetModel: (modelKey: string) => void;
 	onSetThinking: (level: ThinkingLevel) => void;
 	onSetMode: (mode: ExecutionMode) => void;
@@ -66,7 +63,6 @@ export function Composer(props: ComposerProps) {
 				<ComposerPickers
 					models={props.models}
 					modelKey={props.modelKey}
-					fastContext={props.fastContext}
 					fusion={props.fusion}
 					thinkingLevel={props.thinkingLevel}
 					thinkingLevels={props.thinkingLevels}
@@ -75,7 +71,6 @@ export function Composer(props: ComposerProps) {
 					agentPhase={props.agentPhase}
 					disabled={props.streaming || props.disabled}
 					onSetFusion={props.onSetFusion}
-					onSetFastContext={props.onSetFastContext}
 					onSetModel={props.onSetModel}
 					onSetThinking={props.onSetThinking}
 					onSetMode={props.onSetMode}

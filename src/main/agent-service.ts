@@ -18,6 +18,7 @@ import type {
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ForkSessionRequest,
 	ModelOption,
 	OpenSessionRequest,
 	RenameSessionRequest,
@@ -50,7 +51,7 @@ import {
 import { FileJournalRecorder } from "./file-journal-recorder";
 import { attachTruncationRecovery } from "./truncation-recovery";
 import { applyReversal, fileDiffSince, previewReversal } from "./file-restore";
-import { cellIdForMessage, findTurnEntry } from "./checkpoint-anchor";
+import { cellIdForMessage, findTurnEntry, replyEntry } from "./checkpoint-anchor";
 import { normalizeLine, sessionTitle } from "../shared/sessions";
 import { SnapshotDeltaCache, type AgentSnapshotDelta } from "../shared/agent-delta";
 import { remoteToolOutput, remoteView, type RemoteToolOutput, type RemoteViewRequest } from "./agent-remote-view";
@@ -102,17 +103,13 @@ import {
 	WEBSITE_CLONE_TOOL_NAMES,
 } from "./website-clone-tools";
 import { isFusionConfig, type FusionConfig } from "../shared/fusion";
-import {
-	DEFAULT_FAST_CONTEXT_CONFIG,
-	isFastContextConfig,
-	type FastContextConfig,
-} from "../shared/fast-context";
 import { resolveFusion } from "./fusion-config";
 import { withFusionUsage } from "./fusion-usage";
 import { preparePromptImages } from "./prompt-images";
 import { BrowserPreview } from "./browser-preview";
 import { hookService, memorySection, memoryStore } from "./context-services";
 import { createMemoryTool } from "./memory-tool";
+import { isForeignRulePath } from "./foreign-rules";
 import { expandMentions, searchMentions } from "./mentions";
 import { initPrompt } from "./project-instructions";
 import { formatCost, formatTokens } from "../shared/usage";
@@ -316,7 +313,6 @@ export class AgentService {
 	 */
 	private pendingModelKey: string | null = null;
 	private pendingFusion: FusionConfig | null = null;
-	private fastContext: FastContextConfig = { ...DEFAULT_FAST_CONTEXT_CONFIG };
 	private preview: BrowserPreview | null = null;
 	private supportedThinking: typeof import("@earendil-works/pi-ai").getSupportedThinkingLevels | undefined;
 	private pendingThinkingLevel: ThinkingLevel | null = null;
@@ -789,7 +785,8 @@ export class AgentService {
 				!(result?.isError ?? context.isError)
 			) {
 				const path = (context.args as { path?: unknown }).path;
-				if (typeof path === "string" && isInstructionFileName(basename(path))) this.instructionsDirty = true;
+				if (typeof path === "string" && (isInstructionFileName(basename(path)) || isForeignRulePath(path)))
+					this.instructionsDirty = true;
 			}
 			return result;
 		};
@@ -805,8 +802,6 @@ export class AgentService {
 			const workMode = (raw as { workMode?: unknown }).workMode;
 			const fusion = (raw as { fusion?: unknown }).fusion;
 			if (isFusionConfig(fusion)) this.pendingFusion = fusion;
-			const fastContext = (raw as { fastContext?: unknown }).fastContext;
-			if (isFastContextConfig(fastContext)) this.fastContext = { ...fastContext };
 			if (isWorkMode(workMode)) this.workMode = workMode;
 			const mode = (raw as { mode?: unknown }).mode;
 			if (MODES.includes(mode as ExecutionMode)) {
@@ -821,7 +816,7 @@ export class AgentService {
 		try {
 			writeFileSync(
 				this.preferencesPath,
-				`${JSON.stringify({ mode: this.mode, workMode: this.workMode, fusion: this.pendingFusion, fastContext: this.fastContext })}\n`,
+				`${JSON.stringify({ mode: this.mode, workMode: this.workMode, fusion: this.pendingFusion })}\n`,
 			);
 		} catch {
 			// Best-effort — the pick still applies for this run.
@@ -1200,7 +1195,6 @@ export class AgentService {
 		this.pendingModelKey = source.pendingModelKey;
 		this.pendingThinkingLevel = source.pendingThinkingLevel;
 		this.pendingFusion = source.pendingFusion;
-		this.fastContext = { ...source.fastContext };
 		this.mode = source.mode;
 		this.workMode = source.workMode;
 	}
@@ -1419,6 +1413,40 @@ export class AgentService {
 		return branch;
 	}
 
+	/**
+	 * Copy the conversation up to one of the model's replies into a session of
+	 * its own, and say where it is; the caller opens it.
+	 *
+	 * The open session is left exactly as it was — a branch is for trying the
+	 * other way, and the first way should still be there to go back to. So the
+	 * copy is made through a second manager that only reads this file and writes
+	 * the new one, never through the live manager, which would switch the running
+	 * session over to the branch.
+	 *
+	 * The reply is found the way checkpoints find their prompt: a cell id carries
+	 * the message's index in the context, and the session entry holds that very
+	 * message object (see `cellIdForMessage`).
+	 */
+	async forkAt(request: ForkSessionRequest): Promise<OpenSessionRequest> {
+		const session = this.session;
+		if (!session) throw new Error("没有打开的会话");
+		if (!request.cellId.startsWith("assistant-")) throw new Error("只能从 AI 的回复处创建分支");
+		const sm = session.sessionManager;
+		const entry = replyEntry(this.currentBranch(sm), session.messages, request.cellId);
+		// Compacted away, or left behind on another branch: there is no path to copy.
+		if (!entry) throw new Error("这条回复已不在当前对话中，无法从这里创建分支");
+		const sessionFile = sm.getSessionFile();
+		if (!sessionFile || !existsSync(sessionFile)) throw new Error("会话尚未保存，无法创建分支");
+		const { SessionManager } = await pi();
+		const copy = SessionManager.open(sessionFile, this.sessionDir, sm.getCwd());
+		const forked = copy.createBranchedSession(entry.id);
+		if (!forked) throw new Error("创建分支失败");
+		const title = request.title ? normalizeLine(request.title, 80) : "";
+		if (title) copy.appendSessionInfo(title);
+		this.emitSessionsChanged();
+		return { cwd: copy.getCwd(), sessionFile: forked };
+	}
+
 	/** The reversal plan for one checkpoint, or null when it is off the branch. */
 	private reversalFor(id: string): { plan: ReversalPlan; label: string } | null {
 		const session = this.session;
@@ -1545,7 +1573,6 @@ export class AgentService {
 		return {
 			modelKey: model ? modelKeyOf(model) : null,
 			fusion: this.pendingFusion,
-			fastContext: { ...this.fastContext },
 			models: this.modelOptions(),
 			thinkingLevel: model ? (clampThinkingLevel(model, requested) as ThinkingLevel) : "off",
 			thinkingLevels,
@@ -1672,30 +1699,6 @@ export class AgentService {
 		this.pendingError = undefined;
 		this.emit();
 		return this.buildSnapshot();
-	}
-
-	async setFastContext(value: FastContextConfig): Promise<AgentSnapshot | null> {
-		this.assertWorkflowIdle();
-		if (!isFastContextConfig(value)) throw new Error("Invalid Fast Context configuration");
-		const runtime = await this.getModelRuntime();
-		const { clampThinkingLevel } = await piAi();
-		let thinkingLevel = value.thinkingLevel;
-		if (value.modelKey !== null) {
-			const model = runtime
-				.getAvailableSnapshot()
-				.find((m) => modelKeyOf(m) === value.modelKey);
-			if (!model) throw new Error("Fast Context 模型不可用，请重新选择模型");
-			thinkingLevel = clampThinkingLevel(model, thinkingLevel);
-		} else {
-			const fallback = this.session?.model;
-			if (fallback) thinkingLevel = clampThinkingLevel(fallback, thinkingLevel);
-		}
-		this.fastContext = { modelKey: value.modelKey, thinkingLevel };
-		this.savePreferences();
-		if (!this.session) { this.emitDefaults(); return null; }
-		const snapshot = this.buildSnapshot();
-		this.emit(snapshot);
-		return snapshot;
 	}
 
 	private assertWorkflowIdle(): void {
@@ -1828,7 +1831,6 @@ export class AgentService {
 			fusionError,
 		} = await createWorkflowSession({
 			initialFusion: freshCwd ? this.pendingFusion : undefined,
-			getFastContextConfig: () => ({ ...this.fastContext }),
 			onHelperEvent: (event, source) => preview.handle(event, source),
 			cwd: sessionManager.getCwd(),
 			sessionManager,
@@ -2132,7 +2134,6 @@ export class AgentService {
 				return context ? { context } : {};
 			})(),
 			checkpoints: this.listCheckpoints(),
-			fastContext: { ...this.fastContext },
 			fusion: this.workflow?.fusion ?? null,
 			workflow: this.workflow?.state.snapshot() ?? { request: null, todos: [], tasks: [] },
 			streaming: session.isStreaming || this.helperAbort !== null || !!this.workflow?.state.hasRunningTasks,

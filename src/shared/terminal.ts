@@ -2,6 +2,8 @@ export interface TerminalCreateRequest {
 	cwd: string;
 	cols: number;
 	rows: number;
+	/** A saved SSH host: open a remote login shell there instead of a local one. */
+	sshHostId?: string;
 }
 
 export interface TerminalSession {

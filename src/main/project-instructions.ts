@@ -10,6 +10,7 @@ import {
 	type SaveInstructionsRequest,
 } from "../shared/instructions";
 import { pi } from "./pi";
+import { discoverForeignRules, foreignRuleContextFiles } from "./foreign-rules";
 import { checkoutRoot, projectKey, projectRoot } from "./project-root";
 
 /**
@@ -48,6 +49,10 @@ export async function readProjectInstructions(cwd: string): Promise<ProjectInstr
 					? "project"
 					: "ancestor",
 	}));
+	// What a session is actually given of other tools' rules — the same entries,
+	// index included, so the list matches the prompt.
+	for (const file of foreignRuleContextFiles(discoverForeignRules(cwd, root), root))
+		loaded.push({ path: file.path, content: file.content, scope: "imported" });
 	return { cwd: resolve(cwd), loaded, globalPath, projectPath, projectRoot: projectRoot(cwd) };
 }
 

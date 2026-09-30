@@ -14,6 +14,7 @@ import {
   IconArrowBackUp,
   IconArrowBarToDown,
   IconArrowFork,
+  IconBinaryTree2,
   IconArrowForwardUp,
   IconArrowDown,
   IconArrowLeft,
@@ -48,6 +49,7 @@ import {
   IconColumns2,
   IconCopy,
   IconCornerDownRight,
+  IconDeviceDesktop,
   IconDeviceMobile,
   IconDots,
   IconDownload,
@@ -75,6 +77,9 @@ import {
   IconHome,
   IconInfoCircle,
   IconKeyboard,
+  IconPointer,
+  IconServer,
+  IconUpload,
   IconLayoutDistributeHorizontal,
   IconLayoutKanban,
   IconLayoutSidebar,
@@ -229,6 +234,7 @@ export const EyeIcon = adaptIcon(IconEye);
 // file-preview header controls share one visual language with the rest of the
 // chrome (raw source = code brackets, rendered preview = open eye).
 export const CodeIcon: LucideIcon = adaptIcon(IconCode);
+export const AgentMapIcon: LucideIcon = adaptIcon(IconBinaryTree2);
 export const EYE_OPEN_ICON_NAME = "eye-open";
 export const EyeOpenIcon: LucideIcon = adaptIcon(IconEye);
 export const PaperclipIcon = adaptIcon(IconPaperclip);
@@ -365,6 +371,10 @@ export const TemporaryThreadIcon: LucideIcon = ({ className, ...props }) => (
 );
 export const TERMINAL_ICON_NAME = "console";
 export const TerminalIcon = centralIconWrapper(TERMINAL_ICON_NAME);
+export const DesktopIcon = adaptIcon(IconDeviceDesktop);
+export const PointerIcon = adaptIcon(IconPointer);
+export const ServerIcon = adaptIcon(IconServer);
+export const UploadIcon = adaptIcon(IconUpload);
 export const TerminalSquare = centralIconWrapper("console");
 export const TerminalSquareIcon = centralIconWrapper("console");
 export const TextWrapIcon = adaptIcon(IconTextWrap);

@@ -31,6 +31,43 @@ export const FILE_MUTATION_ENTRY = "nekocode.file-mutation";
 /** Tools whose changes are recorded, by the path in their arguments. */
 export const RECORDED_TOOLS: readonly string[] = ["write", "edit"];
 
+/** A file a multi-file tool changed, with its contents from before the change. */
+export interface ReportedPreimage {
+	tool: string;
+	/** Absolute; the recorder checks it is inside the workspace before keeping it. */
+	path: string;
+	/** Null when the tool created the file. */
+	before: Buffer | null;
+}
+
+/**
+ * Pre-images handed over by tools that change several files in one call.
+ *
+ * `write` and `edit` name their one file in their arguments, so the recorder
+ * reads it before they run. A codemod only learns which files it touches by
+ * running, so it reports each file itself, as it writes it, and the recorder
+ * collects them when the call finishes. Keyed by tool call id, which is unique
+ * across sessions; anything never collected (a session with no recorder)
+ * expires rather than accumulating.
+ */
+const reported = new Map<string, { at: number; files: ReportedPreimage[] }>();
+const REPORT_TTL_MS = 10 * 60_000;
+
+export function reportPreimage(toolCallId: string, file: ReportedPreimage): void {
+	const now = Date.now();
+	for (const [id, entry] of reported) if (now - entry.at > REPORT_TTL_MS) reported.delete(id);
+	const entry = reported.get(toolCallId) ?? { at: now, files: [] };
+	// The first report of a file is its state before the call; later ones are not.
+	if (!entry.files.some((existing) => existing.path === file.path)) entry.files.push(file);
+	reported.set(toolCallId, entry);
+}
+
+export function takeReportedPreimages(toolCallId: string): ReportedPreimage[] {
+	const entry = reported.get(toolCallId);
+	reported.delete(toolCallId);
+	return entry?.files ?? [];
+}
+
 /** Tools that change files in ways no argument describes. */
 export const OPAQUE_TOOLS: readonly string[] = SHELL_TOOLS;
 

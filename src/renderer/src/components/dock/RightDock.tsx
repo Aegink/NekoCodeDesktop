@@ -1,3 +1,4 @@
+import type { AgentSnapshot } from "../../../../shared/agent";
 import type { WorkflowTask } from "../../../../shared/workflow";
 import { useTranslation, type TranslationKey } from "../../i18n";
 import { cn } from "../../lib/utils";
@@ -6,8 +7,11 @@ import {
 	SIDEBAR_ROW_HOVER_CLASS_NAME,
 	SIDEBAR_ROW_IDLE_TEXT_CLASS_NAME,
 } from "../../lib/sidebarRowStyles";
+import { api } from "../../api";
 import {
+	AgentMapIcon,
 	BotIcon,
+	DesktopIcon,
 	FoldersIcon,
 	GitBranchIcon,
 	GlobeIcon,
@@ -21,12 +25,14 @@ import { CheckpointsPanel } from "./CheckpointsPanel";
 import { IconButton } from "../ui/icon-button";
 import { BrowserPanel } from "../BrowserPanel";
 import type { BrowserPreviewRequest } from "../../../../shared/browser";
+import { AgentMapPanel } from "./AgentMapPanel";
 import { FilesPanel } from "./FilesPanel";
 import { TaskDetailPanel } from "./TaskDetailPanel";
 import { ReviewPanel } from "../ReviewPanel";
 import { TerminalPanel } from "../TerminalPanel";
+import { DesktopPanel } from "./DesktopPanel";
 
-export type DockTool = "review" | "terminal" | "browser" | "files" | "checkpoints";
+export type DockTool = "agentmap" | "review" | "terminal" | "browser" | "desktop" | "files" | "checkpoints";
 
 /**
  * A dock tab: one of the built-in tools, or one background worker.
@@ -53,9 +59,11 @@ const DOCK_MENU: ReadonlyArray<{
 	icon: typeof GitBranchIcon;
 	shortcut: string;
 }> = [
+	{ id: "agentmap", labelKey: "agentMap.title", icon: AgentMapIcon, shortcut: "Ctrl+Shift+A" },
 	{ id: "review", labelKey: "nav.review", icon: GitBranchIcon, shortcut: "Ctrl+Shift+G" },
 	{ id: "terminal", labelKey: "chat.terminal", icon: TerminalIcon, shortcut: "Ctrl+`" },
 	{ id: "browser", labelKey: "nav.browser", icon: GlobeIcon, shortcut: "Ctrl+T" },
+	{ id: "desktop", labelKey: "dock.desktop", icon: DesktopIcon, shortcut: "Ctrl+Shift+D" },
 	{ id: "files", labelKey: "dock.files", icon: FoldersIcon, shortcut: "Ctrl+P" },
 	{
 		id: "checkpoints",
@@ -66,17 +74,21 @@ const DOCK_MENU: ReadonlyArray<{
 ];
 
 const DOCK_TITLES: Record<DockTool, TranslationKey> = {
+	agentmap: "agentMap.title",
 	review: "nav.review",
 	terminal: "chat.terminal",
 	browser: "nav.browser",
+	desktop: "dock.desktop",
 	files: "dock.files",
 	checkpoints: "checkpoint.panelTitle",
 };
 
 const DOCK_ICONS: Record<DockTool, typeof GitBranchIcon> = {
+	agentmap: AgentMapIcon,
 	review: GitBranchIcon,
 	terminal: TerminalIcon,
 	browser: GlobeIcon,
+	desktop: DesktopIcon,
 	files: FoldersIcon,
 	checkpoints: HistoryIcon,
 };
@@ -92,6 +104,10 @@ interface RightDockProps {
 	active: DockTabId | null;
 	/** Live workers, for worker tab titles and their panels. */
 	tasks: readonly WorkflowTask[];
+	/** The session on screen, for the agent map; null before one is open. */
+	agentSnapshot: AgentSnapshot | null;
+	/** Open a worker's own tab — the agent map's click on a worker. */
+	onOpenTask: (taskId: string) => void;
 	/** Restore points for the open session, newest first. */
 	checkpoints: readonly CheckpointSummary[];
 	/** A run is in flight, so restoring would race it. */
@@ -124,6 +140,8 @@ export function RightDock({
 	tabs,
 	active,
 	tasks,
+	agentSnapshot,
+	onOpenTask,
 	checkpoints,
 	checkpointsBusy,
 	onSelect,
@@ -214,7 +232,8 @@ export function RightDock({
 						active === null ? "dock-pane-visible" : "dock-pane-hidden",
 					)}
 				>
-					{DOCK_MENU.map((entry) => (
+					{/* Remote desktops need the SSH credentials on this machine. */}
+					{DOCK_MENU.filter((entry) => entry.id !== "desktop" || api.runtime !== "web").map((entry) => (
 						<button
 							key={entry.id}
 							type="button"
@@ -247,12 +266,16 @@ export function RightDock({
 						>
 							{taskId !== null ? (
 								<TaskDetailPanel task={taskById.get(taskId) ?? null} onCancel={onCancelTask} />
+							) : tab === "agentmap" ? (
+								<AgentMapPanel snapshot={agentSnapshot} onOpenTask={onOpenTask} />
 							) : tab === "review" ? (
 								<ReviewPanel cwd={cwd} onClose={() => onCloseTab(tab)} />
 							) : tab === "terminal" ? (
 								<TerminalPanel cwd={cwd} docked onClose={() => onCloseTab(tab)} />
 							) : tab === "browser" ? (
 								<BrowserPanel preview={browserPreview} visible={visible && !hidden} onClose={() => onCloseTab(tab)} />
+							) : tab === "desktop" ? (
+								<DesktopPanel visible={!!visible && !hidden} />
 							) : tab === "checkpoints" ? (
 								<CheckpointsPanel
 									checkpoints={checkpoints}

@@ -1,7 +1,7 @@
-import type { FastContextConfig } from "../../shared/fast-context";
 import type { FusionConfig } from "../../shared/fusion";
 import { elementSelectionText, type BrowserPreviewRequest, type ComposerInsertion } from "../../shared/browser";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
 	AgentDefaults,
 	AgentSnapshot,
@@ -13,9 +13,13 @@ import type {
 import type { WorkMode } from "../../shared/workflow";
 import type { CheckpointSummary } from "../../shared/checkpoints";
 import { projectLabel } from "../../shared/paths";
+import { mentionToken } from "../../shared/mentions";
 import { mergeActiveSession, workspaceKey } from "../../shared/sessions";
 import { api, errorMessage } from "./api";
 import { AutomationsPage } from "./components/automations/AutomationsPage";
+import { TasksPage } from "./components/tasks/TasksPage";
+import { activeTaskCount } from "../../shared/task-board";
+import { useTaskBoard } from "./hooks/useTaskBoard";
 import { AcpChatView } from "./components/agents/AcpChatView";
 import { WorkspacePicker, workspaceName } from "./components/agents/WorkspacePicker";
 import { NEKO_LOCAL_WORKSPACE } from "../../shared/acp";
@@ -37,6 +41,16 @@ import { useHostDirectoryPicker } from "./components/HostDirectoryPicker";
 import { Sidebar } from "./components/Sidebar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { TitleBar } from "./components/TitleBar";
+import { ChatSlot, createChatHost } from "./components/ChatSlot";
+import { SplitGrid } from "./components/SplitGrid";
+import { useSplitPanes, type PaneSlot } from "./hooks/useSplitPanes";
+import { startSessionDrag, type DraggedSession } from "./lib/sessionDrag";
+import type { DropPlan } from "./lib/splitLayout";
+import { DragHandleIcon, Maximize2, XIcon } from "./lib/icons";
+import { IconButton } from "./components/ui/icon-button";
+import type { LayoutMode } from "./components/LayoutModeSwitch";
+import type { InlineEditRequest } from "./components/ide/EditorArea";
+import { Spinner } from "./components/ui/spinner";
 import { useAppearanceVariables } from "./hooks/useAppearanceVariables";
 import { useSessions } from "./hooks/useSessions";
 import { useTheme } from "./hooks/useTheme";
@@ -44,7 +58,15 @@ import { DEFAULT_UI_DENSITY, type UiDensity } from "./lib/appDensity";
 import { DEFAULT_CHAT_WIDTH, type ChatWidthMode } from "./lib/chatWidth";
 import { cn } from "./lib/utils";
 import { shareStructure } from "./lib/structural-share";
+import { LinkOpenerContext, openLinkExternally } from "./lib/webSources";
 import { CHAT_MAIN_CONTENT_SURFACE_CLASS_NAME } from "./components/chat/composerPickerStyles";
+import { useTranslation } from "./i18n";
+
+/**
+ * The IDE layout, Monaco included, loads only when someone first switches to
+ * it: several megabytes nobody using the Agent layout should pay for.
+ */
+const IdeLayout = lazy(() => import("./components/ide/IdeLayout"));
 
 const PROJECT_STORAGE_KEY = "nekocode:project-cwd";
 const WORKSPACES_STORAGE_KEY = "nekocode:workspaces";
@@ -55,11 +77,14 @@ const DOCK_OPEN_STORAGE_KEY = "nekocode:dock-open";
 const SIDEBAR_OPEN_STORAGE_KEY = "nekocode:sidebar-open";
 /** NekoLocal or the id of an external agent; see the workspace picker. */
 const AGENT_WORKSPACE_STORAGE_KEY = "nekocode:agent-workspace";
+const LAYOUT_MODE_STORAGE_KEY = "nekocode:layout-mode";
+const IDE_SIDE_OPEN_STORAGE_KEY = "nekocode:ide-side-open";
+const IDE_CHAT_OPEN_STORAGE_KEY = "nekocode:ide-chat-open";
 const DEFAULT_DOCK_WIDTH = 460;
 const MIN_DOCK_WIDTH = 320;
 const MIN_CHAT_WIDTH = 480;
 
-export type WorkspaceView = "chat" | "review" | "pull-requests" | "automations" | "settings";
+export type WorkspaceView = "chat" | "tasks" | "review" | "pull-requests" | "automations" | "settings";
 
 function readStored(key: string): string | null {
 	try {
@@ -79,6 +104,7 @@ function writeStored(key: string, value: string | null): void {
 }
 
 export default function App() {
+	const { t } = useTranslation();
 	const { resolvedTheme, setTheme, theme } = useTheme();
 	const browserAvailable = api.runtime !== "web";
 	const pickDirectory = useHostDirectoryPicker();
@@ -115,6 +141,7 @@ export default function App() {
 		setView(next);
 	};
 	const sessions = useSessions();
+	const taskBoard = useTaskBoard();
 	// Which agent the conversation is with. Remembered across restarts; the
 	// WebUI has no bridge to external agents, so it is always NekoLocal there.
 	const [workspace, setWorkspaceState] = useState<string>(() =>
@@ -159,6 +186,14 @@ export default function App() {
 	 */
 	const showSnapshot = (next: AgentSnapshot | null) =>
 		setSnapshot((previous) => (next ? shareStructure(previous, next) : null));
+	const openSessionRef = useRef<(session: Pick<SessionSummary, "cwd" | "sessionFile">) => Promise<void>>(async () => undefined);
+	/** Up to four sessions side by side; see useSplitPanes. Opens through a ref, as `openSession` comes later. */
+	const openPaneSession = useCallback((session: DraggedSession) => openSessionRef.current(session), []);
+	const panes = useSplitPanes({
+		enabled: api.runtime === "electron" && !acpActive,
+		active: snapshot,
+		open: openPaneSession,
+	});
 	const [browserPreview, setBrowserPreview] = useState<BrowserPreviewRequest | null>(null);
 	const [composerInsertion, setComposerInsertion] = useState<ComposerInsertion | null>(null);
 	// The conversation on screen owns the browser panel: a preview from a
@@ -208,6 +243,43 @@ export default function App() {
 	});
 	const dockDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
+	// Agent or IDE. The IDE is a desktop feature: the WebUI and the phone app
+	// never offer it.
+	const ideAvailable = api.runtime === "electron";
+	const [layoutMode, setLayoutModeState] = useState<LayoutMode>(() =>
+		ideAvailable && readStored(LAYOUT_MODE_STORAGE_KEY) === "ide" ? "ide" : "agent",
+	);
+	/** Mounted on first use and then kept, hidden, so its tabs and edits survive switching back. */
+	const [ideMounted, setIdeMounted] = useState(layoutMode === "ide");
+	const setLayoutMode = (mode: LayoutMode) => {
+		setLayoutModeState(mode);
+		writeStored(LAYOUT_MODE_STORAGE_KEY, mode);
+		if (mode === "ide") setIdeMounted(true);
+	};
+	const [ideSideOpen, setIdeSideOpen] = useState(() => readStored(IDE_SIDE_OPEN_STORAGE_KEY) !== "0");
+	const [ideChatOpen, setIdeChatOpen] = useState(() => readStored(IDE_CHAT_OPEN_STORAGE_KEY) !== "0");
+	const setIdeSideOpenStored = (open: boolean) => {
+		setIdeSideOpen(open);
+		writeStored(IDE_SIDE_OPEN_STORAGE_KEY, open ? "1" : "0");
+	};
+	const setIdeChatOpenStored = (open: boolean) => {
+		setIdeChatOpen(open);
+		writeStored(IDE_CHAT_OPEN_STORAGE_KEY, open ? "1" : "0");
+	};
+	/** A file the conversation asked the IDE to open; the nonce re-raises the same path. */
+	const [ideOpenFile, setIdeOpenFile] = useState<{ path: string; nonce: number } | null>(null);
+	/**
+	 * Each chat pane is rendered once, into its host, and shown by whichever
+	 * layout is active: the Agent layout's grid, or the IDE's chat column for
+	 * the focused pane.
+	 */
+	const chatHosts = useRef(new Map<string, HTMLElement>());
+	const hostFor = (key: string): HTMLElement => {
+		let host = chatHosts.current.get(key);
+		if (!host) chatHosts.current.set(key, (host = createChatHost()));
+		return host;
+	};
+
 	const setDockOpenStored = (open: boolean) => {
 		setDockOpen(open);
 		writeStored(DOCK_OPEN_STORAGE_KEY, open ? "1" : "0");
@@ -222,6 +294,10 @@ export default function App() {
 
 	/** Open a file in the dock's Files pane — the "Read file" tool row's click. */
 	const openDockFile = (path: string) => {
+		if (layoutMode === "ide") {
+			setIdeOpenFile({ path, nonce: Date.now() });
+			return;
+		}
 		setDockFile({ path, nonce: Date.now() });
 		openDockTab("files");
 	};
@@ -273,6 +349,7 @@ export default function App() {
 	// Codex-style dock shortcuts, advertised next to each level-1 menu row.
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (layoutMode === "ide") return;
 			if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
 			const tool: DockTool | null =
 				event.code === "Backquote" && !event.shiftKey
@@ -285,7 +362,11 @@ export default function App() {
 								? "review"
 								: event.code === "KeyH" && event.shiftKey
 									? "checkpoints"
-									: null;
+									: event.code === "KeyA" && event.shiftKey
+										? "agentmap"
+										: event.code === "KeyD" && event.shiftKey && api.runtime !== "web"
+											? "desktop"
+											: null;
 			if (!tool) return;
 			event.preventDefault();
 			toggleDockTool(tool);
@@ -325,10 +406,48 @@ export default function App() {
 
 	useEffect(() => api.onAgentDefaults(setDefaults), []);
 
-	// Clicking a finished task's notification opens it. Routed through a ref
+	// Clicking a finished task's notification opens it. Routed through the ref
 	// because the subscription outlives the render that made `openSession`.
-	const openSessionRef = useRef<(session: SessionSummary) => Promise<void>>(async () => undefined);
 	useEffect(() => api.onRevealSession((session) => void openSessionRef.current(session)), []);
+
+	// A link in an answer opens as a tab in the dock's browser, beside the chat
+	// it came from. The IDE layout has no dock on screen to show it in, and the
+	// WebUI has no in-app browser, so there it goes to the system browser.
+	const layoutModeRef = useRef(layoutMode);
+	layoutModeRef.current = layoutMode;
+	const openLink = useCallback((url: string) => {
+		if (!browserAvailable || layoutModeRef.current === "ide") {
+			openLinkExternally(url);
+			return;
+		}
+		const scope = currentPreviewScope.current;
+		setBrowserPreview({ id: crypto.randomUUID(), sessionId: scope.sessionId ?? "", cwd: scope.cwd ?? "", url, kind: "link" });
+		setDockTabs((tabs) => (tabs.includes("browser") ? tabs : [...tabs, "browser"]));
+		setDockActive("browser");
+		setDockOpen(true);
+		writeStored(DOCK_OPEN_STORAGE_KEY, "1");
+	}, []);
+
+	// The agent opening a remote desktop brings it on screen, as its browser does:
+	// the user should see a machine being operated, not find out afterwards.
+	const knownDesktops = useRef(new Set<string>());
+	useEffect(
+		() =>
+			api.onDesktopState((states) => {
+				for (const state of states) {
+					if (state.phase === "closed") {
+						knownDesktops.current.delete(state.hostId);
+						continue;
+					}
+					if (knownDesktops.current.has(state.hostId)) continue;
+					knownDesktops.current.add(state.hostId);
+					if (state.controller === "agent") openDockTab("desktop");
+				}
+				for (const hostId of [...knownDesktops.current])
+					if (!states.some((state) => state.hostId === hostId)) knownDesktops.current.delete(hostId);
+			}),
+		[],
+	);
 
 	useEffect(() => {
 		if (!browserAvailable) return;
@@ -444,7 +563,7 @@ export default function App() {
 	 * one asked for is the one that ends up active — and the only reply that
 	 * gets to put itself on screen.
 	 */
-	const openSession = async (session: SessionSummary) => {
+	const openSession = async (session: Pick<SessionSummary, "cwd" | "sessionFile">) => {
 		const seq = ++transitionSeq.current;
 		try {
 			const next = await api.agentOpen({ cwd: session.cwd, sessionFile: session.sessionFile });
@@ -459,6 +578,25 @@ export default function App() {
 		}
 	};
 	openSessionRef.current = openSession;
+
+	/**
+	 * Branch at a reply and go to the branch — the same arrival as opening a
+	 * session from the sidebar, which is where the original stays waiting.
+	 */
+	const forkSession = async (cellId: string, title = snapshot?.session.title) => {
+		const seq = ++transitionSeq.current;
+		try {
+			const next = await api.agentFork({ cellId, title: title ? t("message.branchTitle", { title }) : undefined });
+			if (!next || seq !== transitionSeq.current) return;
+			setCwd(next.session.cwd);
+			writeStored(PROJECT_STORAGE_KEY, next.session.cwd);
+			showSnapshot(next);
+			setView("chat");
+			setError(null);
+		} catch (cause) {
+			if (seq === transitionSeq.current) setError(errorMessage(cause));
+		}
+	};
 
 	const createSession = async (targetCwd = cwd): Promise<boolean> => {
 		if (!targetCwd || sessionTransition.current) return false;
@@ -538,8 +676,7 @@ export default function App() {
 	 * to the sidebar, running dot and all. Clicking that row opens it the usual
 	 * way — full screen, like every other session.
 	 */
-	const startBackgroundTask = async (text: string) => {
-		const target = snapshot?.session.cwd ?? cwd;
+	const startBackgroundTask = async (text: string, target = snapshot?.session.cwd ?? cwd) => {
 		if (!target) return;
 		try {
 			const result = await api.agentStartBackground({ cwd: target, text });
@@ -563,13 +700,6 @@ export default function App() {
 	const setFusion = async (config: FusionConfig) => {
 		try {
 			const next = await api.agentSetFusion(config);
-			if (next) showSnapshot(next);
-		} catch (cause) { setError(errorMessage(cause)); }
-	};
-
-	const setFastContext = async (config: FastContextConfig) => {
-		try {
-			const next = await api.agentSetFastContext(config);
 			if (next) showSnapshot(next);
 		} catch (cause) { setError(errorMessage(cause)); }
 	};
@@ -623,6 +753,168 @@ export default function App() {
 		setError(result.warnings.length ? result.warnings.join("；") : null);
 	};
 
+	/** Put text at the end of the composer's draft — the IDE's "Add to chat". */
+	const addToChat = (text: string) => {
+		setComposerInsertion((pending) => ({ id: crypto.randomUUID(), text: (pending?.text ?? "") + text }));
+	};
+
+	/**
+	 * Ctrl+K in the editor: the selected lines and the instruction go to the
+	 * agent as a prompt. The file is referenced with `@`, so the agent gets it
+	 * whole, and the lines are quoted so it knows which part is meant.
+	 */
+	const inlineEdit = async (request: InlineEditRequest) => {
+		const lines =
+			request.startLine === request.endLine ? `第 ${request.startLine} 行` : `第 ${request.startLine}-${request.endLine} 行`;
+		const fence = request.selection.includes("```") ? "````" : "```";
+		const language = request.language === "plaintext" ? "" : request.language;
+		const text =
+			`修改 ${mentionToken({ kind: "file", path: request.relPath })} 的${lines}：${request.instruction}\n\n` +
+			`这一段现在是：\n${fence}${language}\n${request.selection.replace(/\n+$/, "")}\n${fence}\n\n` +
+			"只改这一段需要改的地方（相关的导入等可以一并调整），改完用一两句话说明改了什么。";
+		if (acpActive) {
+			const target = acp.snapshot?.cwd ?? cwd;
+			if (target) await acp.send(target, text);
+			return;
+		}
+		if (snapshot) await send({ text });
+		else await startSession({ text });
+	};
+
+	// An agent run ending is when files and git state are likeliest to have
+	// moved; the IDE refreshes its tree and source control on this.
+	const streamingNow = acpActive ? (acp.snapshot?.streaming ?? false) : (snapshot?.streaming ?? false);
+	const [agentActivity, setAgentActivity] = useState(0);
+	const wasStreaming = useRef(false);
+	useEffect(() => {
+		if (wasStreaming.current && !streamingNow) setAgentActivity((value) => value + 1);
+		wasStreaming.current = streamingNow;
+	}, [streamingNow]);
+
+	/**
+	 * One pane's conversation.
+	 *
+	 * Main acts on the selected session only, and the focused pane is that
+	 * session; a pane that is not focused first becomes it — `panes.ready` —
+	 * before anything it asks for goes out. Alone in the chat area, the pane is
+	 * the chat view as it has always been.
+	 */
+	const renderPaneChat = (slot: PaneSlot) => {
+		const focused = slot.leaving === undefined && slot.key === panes.focused;
+		if (acpActive && acp.agent && focused) {
+			return (
+				<AcpChatView
+					insertion={composerInsertion}
+					onInsertionConsumed={(id) => setComposerInsertion((current) => (current?.id === id ? null : current))}
+					agent={acp.agent}
+					composerHeader={workspacePicker}
+					cwd={acp.snapshot?.cwd ?? cwd}
+					error={acp.error}
+					historyError={acp.historyError}
+					onAbort={acp.cancel}
+					onDismissError={acp.dismissError}
+					onPickProject={pickProject}
+					onRespondPermission={acp.respondPermission}
+					onSend={(request) => {
+						const target = acp.snapshot?.cwd ?? cwd;
+						if (target) void acp.send(target, request.text, request.images);
+					}}
+					onSetConfig={acp.setConfig}
+					snapshot={acp.snapshot}
+				/>
+			);
+		}
+		const split = panes.split;
+		const paneSnapshot = panes.snapshotFor(slot);
+		const sessionCwd = paneSnapshot?.session.cwd ?? cwd;
+		/** Run an action once this pane's session is the selected one. */
+		const inPane =
+			<A extends unknown[]>(action: (...args: A) => unknown) =>
+			(...args: A): void => {
+				if (!split) void action(...args);
+				else void panes.ready(slot.key).then(() => action(...args));
+			};
+		return (
+			<ChatView
+				composerHeader={split ? undefined : workspacePicker}
+				onGoalAction={async (action) => {
+					await panes.ready(slot.key);
+					const next = await api.agentGoal(action);
+					if (next) showSnapshot(next);
+				}}
+				loadMentions={(query) => api.agentMentions(query, sessionCwd ?? undefined)}
+				insertion={focused ? composerInsertion : null}
+				onInsertionConsumed={(id) => setComposerInsertion((current) => current?.id === id ? null : current)}
+				cwd={sessionCwd}
+				snapshot={paneSnapshot}
+				loadingSession={split && !paneSnapshot}
+				earlierAvailable={focused && (paneSnapshot?.earlierCells ?? 0) > 0}
+				loadingEarlier={focused && loadingEarlier}
+				onLoadEarlier={() => void loadEarlier()}
+				onLoadToolOutput={async (toolCallId, offset) => {
+					await panes.ready(slot.key);
+					return loadToolOutput(toolCallId, offset);
+				}}
+				defaults={defaults}
+				busy={busy}
+				error={focused ? error : null}
+				terminalOpen={focused && terminalOpen}
+				browserAvailable={browserAvailable}
+				browserOpen={focused && dockOpen && dockActive === "browser"}
+				onPickProject={pickProject}
+				onSend={inPane(send)}
+				onSendBackground={inPane((text: string) => startBackgroundTask(text, sessionCwd))}
+				// Stopping a run needs no selection: main can abort any live session.
+				onAbort={() => void (split && paneSnapshot ? api.agentAbortTask(paneSnapshot.session.id) : api.agentAbort())}
+				onSetFusion={inPane(setFusion)}
+				onSetModel={inPane(setModel)}
+				onSetThinking={inPane(setThinking)}
+				onSetMode={inPane(setMode)}
+				onSetWorkMode={inPane(setWorkMode)}
+				onOpenReview={layoutMode === "ide" ? undefined : inPane(() => setView("review"))}
+				onToggleTerminal={inPane(() => setTerminalOpen((open) => !open))}
+				onToggleBrowser={inPane(() => toggleDockTool("browser"))}
+				onOpenTask={layoutMode === "ide" ? undefined : inPane((taskId: string) => openDockTab(taskTabId(taskId)))}
+				onOpenFile={inPane(openDockFile)}
+				onDismissError={() => setError(null)}
+				onStartSession={startSession}
+				onWorktreeReleased={() => sessions.refresh()}
+				onWorktreeError={setError}
+				onRestoreCheckpoint={inPane(setRestoreTarget)}
+				onForkMessage={async (cellId) => {
+					await panes.ready(slot.key);
+					await forkSession(cellId, paneSnapshot?.session.title);
+				}}
+				onOpenCheckpoints={inPane(() => openDockTab("checkpoints"))}
+				hideDockActions={layoutMode === "ide"}
+				compactHeader={split && layoutMode === "agent"}
+				headerActions={
+					split && layoutMode === "agent" && slot.session ? (
+						<PaneControls
+							session={slot.session}
+							title={paneSnapshot?.session.title ?? ""}
+							onMaximize={() => panes.maximize(slot.key)}
+							onClose={() => panes.close(slot.key)}
+						/>
+					) : undefined
+				}
+			/>
+		);
+	};
+
+	// A pane that is gone takes its host with it.
+	const slotKeys = panes.slots.map((slot) => slot.key).join(",");
+	useEffect(() => {
+		const keys = new Set(slotKeys.split(","));
+		for (const key of [...chatHosts.current.keys()]) if (!keys.has(key)) chatHosts.current.delete(key);
+	}, [slotKeys]);
+
+	const dropSession = (session: DraggedSession, plan: DropPlan) => {
+		// Onto the welcome screen, or the one pane already showing it: nothing to split.
+		if (plan.order.length < 2) void openSession(session);
+		else panes.drop(session, plan);
+	};
+
 	const startDockDrag = (event: React.MouseEvent) => {
 		event.preventDefault();
 		dockDragRef.current = { startX: event.clientX, startWidth: dockWidth };
@@ -653,20 +945,37 @@ export default function App() {
 	};
 
 	return (
+		<LinkOpenerContext.Provider value={openLink}>
 		<div className="app-window-backdrop flex h-dvh min-h-0 w-full flex-col overflow-hidden text-foreground">
 			<TitleBar
 				projectLabel={cwd ? projectLabel(cwd, api.homeDir) : null}
-				sidebarOpen={sidebarOpen}
-				onToggleSidebar={() =>
+				layoutMode={ideAvailable ? layoutMode : undefined}
+				onLayoutModeChange={ideAvailable ? setLayoutMode : undefined}
+				sidebarOpen={layoutMode === "ide" ? ideSideOpen : sidebarOpen}
+				onToggleSidebar={() => {
+					if (layoutMode === "ide") {
+						setIdeSideOpenStored(!ideSideOpen);
+						return;
+					}
 					setSidebarOpen((open) => {
 						writeStored(SIDEBAR_OPEN_STORAGE_KEY, open ? "0" : "1");
 						return !open;
-					})
-				}
-				dockOpen={dockOpen}
-				onToggleDock={() => setDockOpenStored(!dockOpen)}
+					});
+				}}
+				dockOpen={layoutMode === "ide" ? ideChatOpen : dockOpen}
+				onToggleDock={() => (layoutMode === "ide" ? setIdeChatOpenStored(!ideChatOpen) : setDockOpenStored(!dockOpen))}
 			/>
-			<div className="app-chrome-surface flex min-h-0 min-w-0 flex-1 overflow-hidden">
+			{/* Both layouts stay laid out, one over the other: hiding with visibility
+			    rather than unmounting keeps the browser's webviews and the IDE's
+			    editors alive across a switch. */}
+			<div className="relative flex min-h-0 min-w-0 flex-1">
+			<div
+				inert={layoutMode === "ide"}
+				className={cn(
+					"app-chrome-surface absolute inset-0 flex min-h-0 min-w-0 overflow-hidden",
+					layoutMode === "ide" && "layout-hidden",
+				)}
+			>
 				{sidebarOpen ? (
 					<Sidebar
 						cwd={cwd}
@@ -675,8 +984,10 @@ export default function App() {
 						sessionsLoading={acpActive ? acp.loading : sessions.loading}
 						workspaceName={workspaceName(acpActive ? workspace : NEKO_LOCAL_WORKSPACE, acp.agents)}
 						sessionsReadOnly={acpActive}
+						sessionsDraggable={api.runtime === "electron" && !acpActive}
 						activeSessionId={acpActive ? acp.activeRowId : (snapshot?.session.id ?? null)}
 						streaming={acpActive ? (acp.snapshot?.streaming ?? false) : (snapshot?.streaming ?? false)}
+						activeTasks={activeTaskCount(taskBoard)}
 						view={view}
 						busy={busy}
 						theme={theme}
@@ -694,7 +1005,9 @@ export default function App() {
 							if (!acpActive) void sessions.rename(session, title);
 						}}
 						onDeleteSession={(session) => {
-							if (!acpActive) void sessions.remove(session);
+							if (acpActive) return;
+							panes.forget(session.id);
+							void sessions.remove(session);
 						}}
 						onSelectView={selectView}
 						onToggleBrowser={() => toggleDockTool("browser")}
@@ -717,75 +1030,45 @@ export default function App() {
 							cwd={snapshot?.session.cwd ?? cwd}
 							projects={workspaces}
 						/>
+					) : view === "tasks" ? (
+						<TasksPage
+							cwd={cwd}
+							entries={taskBoard}
+							workspaceName={workspaceName(NEKO_LOCAL_WORKSPACE, acp.agents)}
+							onOpen={(entry) => {
+								// Board tasks are NekoLocal sessions; an agent workspace on
+								// screen would leave the opened one out of sight.
+								if (acpActive) setWorkspace(NEKO_LOCAL_WORKSPACE);
+								void openSession(entry);
+							}}
+							onOpenSettings={() => {
+								setSettingsSection("general");
+								setView("settings");
+							}}
+							onClose={() => setView("chat")}
+						/>
 					) : view === "review" ? (
 						<ReviewPanel cwd={cwd} onClose={() => setView("chat")} />
 					) : view === "pull-requests" ? (
 						<PullRequestsPage cwd={cwd} onClose={() => setView("chat")} />
 					) : view === "automations" ? (
 						<AutomationsPage cwd={cwd} onClose={() => setView("chat")} />
-					) : acpActive && acp.agent ? (
-						<AcpChatView
-							insertion={composerInsertion}
-							onInsertionConsumed={(id) => setComposerInsertion((current) => (current?.id === id ? null : current))}
-							agent={acp.agent}
-							composerHeader={workspacePicker}
-							cwd={acp.snapshot?.cwd ?? cwd}
-							error={acp.error}
-							historyError={acp.historyError}
-							onAbort={acp.cancel}
-							onDismissError={acp.dismissError}
-							onPickProject={pickProject}
-							onRespondPermission={acp.respondPermission}
-							onSend={(request) => {
-								const target = acp.snapshot?.cwd ?? cwd;
-								if (target) void acp.send(target, request.text, request.images);
-							}}
-							onSetConfig={acp.setConfig}
-							snapshot={acp.snapshot}
-						/>
 					) : (
-						<ChatView
-							composerHeader={workspacePicker}
-							onGoalAction={async (action) => {
-								const next = await api.agentGoal(action);
-								if (next) showSnapshot(next);
-							}}
-							loadMentions={(query) => api.agentMentions(query, snapshot?.session.cwd ?? cwd ?? undefined)}
-							insertion={composerInsertion}
-							onInsertionConsumed={(id) => setComposerInsertion((current) => current?.id === id ? null : current)}
-							cwd={cwd}
-							snapshot={snapshot}
-							earlierAvailable={(snapshot?.earlierCells ?? 0) > 0}
-							loadingEarlier={loadingEarlier}
-							onLoadEarlier={() => void loadEarlier()}
-							onLoadToolOutput={loadToolOutput}
-							defaults={defaults}
-							busy={busy}
-							error={error}
-							terminalOpen={terminalOpen}
-							browserAvailable={browserAvailable}
-							browserOpen={dockOpen && dockActive === "browser"}
-							onPickProject={pickProject}
-							onSend={send}
-							onSendBackground={(text) => void startBackgroundTask(text)}
-							onAbort={() => void api.agentAbort()}
-							onSetFusion={setFusion}
-							onSetFastContext={setFastContext}
-							onSetModel={setModel}
-							onSetThinking={setThinking}
-							onSetMode={setMode}
-							onSetWorkMode={setWorkMode}
-							onOpenReview={() => setView("review")}
-							onToggleTerminal={() => setTerminalOpen((open) => !open)}
-							onToggleBrowser={() => toggleDockTool("browser")}
-							onOpenTask={(taskId) => openDockTab(taskTabId(taskId))}
-							onOpenFile={openDockFile}
-							onDismissError={() => setError(null)}
-							onStartSession={startSession}
-							onWorktreeReleased={() => sessions.refresh()}
-							onWorktreeError={setError}
-							onRestoreCheckpoint={setRestoreTarget}
-							onOpenCheckpoints={() => openDockTab("checkpoints")}
+						<SplitGrid
+							slots={panes.slots}
+							live={panes.live}
+							focused={panes.focused}
+							sessions={
+								panes.split
+									? panes.live.flatMap((slot) => (slot.session ? [slot.session.id] : []))
+									: snapshot && !acpActive
+										? [snapshot.session.id]
+										: []
+							}
+							acceptDrops={api.runtime === "electron" && !acpActive}
+							renderPane={(slot) => <ChatSlot host={hostFor(slot.key)} active={layoutMode === "agent"} />}
+							onFocus={panes.focus}
+							onDrop={dropSession}
 						/>
 					)}
 					</ViewErrorBoundary>
@@ -823,6 +1106,8 @@ export default function App() {
 							tabs={dockTabs}
 							active={dockActive}
 							tasks={liveTasks}
+							agentSnapshot={snapshot ?? null}
+							onOpenTask={(taskId) => openDockTab(taskTabId(taskId))}
 							checkpoints={snapshot?.checkpoints ?? []}
 							checkpointsBusy={busy || (snapshot?.streaming ?? false)}
 							onSelect={(tab) => (tab === null ? setDockActive(null) : openDockTab(tab))}
@@ -834,6 +1119,70 @@ export default function App() {
 					</div>
 				</aside>
 			</div>
+			{ideMounted ? (
+				<div
+					inert={layoutMode !== "ide"}
+					className={cn(
+						"app-chrome-surface absolute inset-0 flex min-h-0 min-w-0 flex-col overflow-hidden",
+						layoutMode !== "ide" && "layout-hidden",
+					)}
+				>
+					<Suspense
+						fallback={
+							<div className="flex flex-1 items-center justify-center">
+								<Spinner className="size-4" />
+							</div>
+						}
+					>
+						<IdeLayout
+							cwd={cwd}
+							visible={layoutMode === "ide"}
+							dark={resolvedTheme === "dark"}
+							chat={<ChatSlot host={hostFor(panes.focused)} active={layoutMode === "ide"} />}
+							chatTitle={
+								acpActive
+									? null
+									: snapshot?.session.titlePending
+										? null
+										: (snapshot?.session.title ?? null)
+							}
+							sideOpen={ideSideOpen}
+							onSideOpenChange={setIdeSideOpenStored}
+							chatOpen={ideChatOpen}
+							onChatOpenChange={setIdeChatOpenStored}
+							streaming={streamingNow}
+							agentActivity={agentActivity}
+							openFileRequest={ideOpenFile}
+							sessions={acpActive ? acp.rows : sessionRows}
+							activeSessionId={acpActive ? acp.activeRowId : (snapshot?.session.id ?? null)}
+							onOpenSession={(session) => (acpActive ? openAcpSession(session) : void openSession(session))}
+							onNewSession={() => {
+								if (!acpActive) return void createSession();
+								acp.startNew();
+							}}
+							onAddToChat={addToChat}
+							onInlineEdit={inlineEdit}
+							onOpenSettings={() => {
+								setLayoutMode("agent");
+								setSettingsSection(undefined);
+								setView("settings");
+							}}
+							onPickProject={() => void pickProject()}
+						/>
+					</Suspense>
+				</div>
+			) : null}
+			</div>
+			{/* Each pane rendered once and moved between layouts; see ChatSlot. */}
+			{panes.slots.map((slot) =>
+				createPortal(
+					<ViewErrorBoundary resetKey={`chat:${panes.snapshotFor(slot)?.session.id ?? ""}`}>
+						{renderPaneChat(slot)}
+					</ViewErrorBoundary>,
+					hostFor(slot.key),
+					slot.key,
+				),
+			)}
 			{/* Outside the chrome row: a modal belongs to the window, not to the pane
 			    that raised it, and both the transcript and the dock raise this one. */}
 			<CheckpointRestoreDialog
@@ -843,6 +1192,45 @@ export default function App() {
 				onError={setError}
 			/>
 			<AutomaticUpdateDialog deferred={restoreTarget !== null} />
+		</div>
+		</LinkOpenerContext.Provider>
+	);
+}
+
+/**
+ * A split pane's own controls, at the end of its header: a grip to drag it to
+ * another place in the layout, and the two ways out of the split.
+ */
+function PaneControls({
+	session,
+	title,
+	onMaximize,
+	onClose,
+}: {
+	session: DraggedSession;
+	title: string;
+	onMaximize: () => void;
+	onClose: () => void;
+}) {
+	const { t } = useTranslation();
+	return (
+		<div data-pane-control className="-mr-1 flex shrink-0 items-center gap-0.5 pl-1">
+			<span
+				aria-label={t("split.move")}
+				className="flex size-6 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--color-background-button-secondary-hover)] hover:text-foreground active:cursor-grabbing"
+				draggable
+				onDragStart={(event) => startSessionDrag(event, session, title)}
+				role="img"
+				title={t("split.move")}
+			>
+				<DragHandleIcon className="size-3.5" />
+			</span>
+			<IconButton label={t("split.maximize")} onClick={onMaximize} title={t("split.maximize")}>
+				<Maximize2 className="size-3.5" />
+			</IconButton>
+			<IconButton label={t("split.close")} onClick={onClose} title={t("split.close")}>
+				<XIcon className="size-3.5" />
+			</IconButton>
 		</div>
 	);
 }

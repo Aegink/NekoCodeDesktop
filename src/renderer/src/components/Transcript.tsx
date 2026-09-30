@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { ThinkingOrb } from "thinking-orbs";
 import type { AgentCell } from "../../../shared/agent";
 import type { CheckpointSummary } from "../../../shared/checkpoints";
-import type { WorkflowTask } from "../../../shared/workflow";
+import type { ExplorerRun, WorkflowTask } from "../../../shared/workflow";
 import {
 	groupTranscriptRows,
 	workToolCount,
@@ -12,28 +12,40 @@ import {
 	type WorkItem,
 	type WorkRow,
 } from "../../../shared/transcript";
-import { UsagePanel } from "./chat/UsagePanel";
-import { useTranslation, type TranslationKey } from "../i18n";
+import { MessageActions } from "./chat/MessageActions";
+import { useTranslation, type TranslateFn } from "../i18n";
 import { elapsedSeconds, formatElapsed, useNow } from "../lib/elapsed";
 import { cn } from "../lib/utils";
-import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, FileIcon, FolderIcon, Loader2Icon, SearchIcon, TerminalIcon, TriangleAlertIcon, HammerIcon, Undo2Icon } from "../lib/icons";
-import { Spinner } from "./ui/spinner";
-import { FileTypeIcon } from "../lib/fileIcons";
+import { ChevronDownIcon, ChevronRightIcon, CircleAlertIcon, FileIcon, Undo2Icon } from "../lib/icons";
 import { highlightWhenIdle } from "../lib/codeHighlight";
 import { TaskCard } from "./chat/AgentTask";
+import { FastContextCard } from "./chat/FastContextCard";
 import { EditedFilesCard } from "./chat/EditedFilesCard";
-import { lastThinkingLine, ThinkingBlock } from "./chat/Thinking";
 import {
-	MUTED_LABEL_TEXT_CLASS_NAME,
-	SOFT_SURFACE_FILL_CLASS_NAME,
-} from "../surfaceStyles";
+	CARD_CLASS_NAME,
+	CARD_HEADER_CLASS_NAME,
+	ComputerUseCard,
+	ToolCall,
+	ToolLine,
+	ToolOutputContext,
+	toolPhase,
+	toolSummary,
+	workUnits,
+} from "./chat/ToolCalls";
+import { lastThinkingLine, ThinkingBlock } from "./chat/Thinking";
+import { MarkdownLink, SourceList } from "./chat/WebSources";
+import { collectWebTitles, WebTitlesContext } from "../lib/webSources";
+import { MUTED_LABEL_TEXT_CLASS_NAME } from "../surfaceStyles";
+
+/** Links never navigate the window; see {@link MarkdownLink}. Stable, so memoized rows stay memoized. */
+const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 
 // Parsing is the dearest thing a transcript row does, and a long session has
 // hundreds of rows: only a message whose text actually changed re-parses.
 const Markdown = memo(function Markdown({ text, user }: { text: string; user?: boolean }) {
 	return (
 		<div className={cn("chat-markdown", user && "chat-markdown--user")}>
-			<ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+			<ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>{text}</ReactMarkdown>
 		</div>
 	);
 });
@@ -112,34 +124,41 @@ const CellThinking = memo(function CellThinking({ cell }: { cell: AssistantCellD
 /**
  * What the model said, with nothing it did: the reasoning that produced this
  * text lives in the work group above it, so the answer reads at the top level.
+ * The reply that closes a turn carries the turn's actions — copy, branch,
+ * usage. A remark in the middle of a run does not: a button row under it would
+ * read as part of the text, and a branch cut there would end mid-run.
  */
-const MessageCell = memo(function MessageCell({ cell }: { cell: AssistantCellData }) {
+const MessageCell = memo(function MessageCell({
+	cell,
+	closesTurn,
+	onFork,
+}: {
+	cell: AssistantCellData;
+	closesTurn: boolean;
+	onFork?: (cellId: string) => Promise<void> | void;
+}) {
 	return (
 		<div className="flex w-full flex-col gap-2">
 			{cell.text ? <Markdown text={cell.text} /> : null}
+			{/* Once the answer is whole: a list that reshuffles as citations stream in reads as flicker. */}
+			{cell.text && !cell.streaming ? <SourceList text={cell.text} /> : null}
 			{cell.error ? (
 				<div className="flex items-start gap-1.5 text-[length:var(--app-font-size-chat-meta,10px)] text-destructive">
 					<CircleAlertIcon className="mt-px size-3.5 shrink-0" />
 					<span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{cell.error}</span>
 				</div>
 			) : null}
-			{cell.usage ? <UsagePanel usage={cell.usage} /> : null}
+			{closesTurn && !cell.streaming && (cell.text || cell.usage) ? (
+				<MessageActions cell={cell} onFork={cell.text ? onFork : undefined} />
+			) : null}
 		</div>
 	);
 });
 
-function toolArgsPreview(args: unknown): string {
-	if (args === undefined || args === null) return "";
-	if (typeof args === "string") return args;
-	try {
-		return JSON.stringify(args);
-	} catch {
-		return "";
-	}
-}
-
 interface TaskView {
 	tasks: Map<string, WorkflowTask>;
+	/** Live Fast Context runs, by the `code_search` call that started each. */
+	explorers?: Map<string, ExplorerRun>;
 	/** Show the worker's full run in the dock; absent outside a live session. */
 	open?: (taskId: string) => void;
 	/** Show a file the agent touched in the dock's Files pane. */
@@ -156,29 +175,12 @@ interface TaskView {
 const TaskLookupContext = createContext<TaskView>({ tasks: new Map() });
 
 /**
- * Fetch the rest of a tool result the transcript only carries the head of.
- *
- * A context for the same reason as {@link TaskLookupContext}: the tool row sits
- * two levels inside a work group, and only remote surfaces supply one at all —
- * a local session already holds every result in full.
- */
-const ToolOutputContext = createContext<
-	((toolCallId: string, offset: number) => Promise<{ text: string; total: number }>) | undefined
->(undefined);
-
-/**
  * The worker a `task` call started, if it is still known.
  *
  * The id comes back in the tool's own result, which is the only thing tying the
  * transcript row to the live worker — the row is a record of the request, the
  * worker is the thing still running.
  */
-/** Character counts, in the units someone deciding whether to fetch cares about. */
-function formatSize(chars: number): string {
-	if (chars >= 1024 * 1024) return `${(chars / 1024 / 1024).toFixed(1)} MB`;
-	return `${(Math.max(chars, 1) / 1024).toFixed(chars < 1024 ? 1 : 0)} KB`;
-}
-
 function taskIdOf(cell: Extract<AgentCell, { type: "tool" }>): string | null {
 	if (cell.toolName !== "task" || !cell.output) return null;
 	try {
@@ -263,6 +265,7 @@ function FileEditCell({
 	const { t } = useTranslation();
 	const lines = preview.lines;
 	const live = active && (cell.status === "pending" || cell.status === "running");
+	const [open, setOpen] = useState(true);
 	const [highlighted, setHighlighted] = useState<{ code: string; path: string; lines: string[] } | null>(null);
 	const bodyRef = useRef<HTMLDivElement | null>(null);
 	const followRef = useRef(true);
@@ -309,42 +312,44 @@ function FileEditCell({
 	const basename = preview.path.split(/[\\/]/).pop() || t(cell.toolName === "write" ? "fileEdit.write" : "fileEdit.edit");
 	const additions = lines.filter((line) => line.kind === "add").length;
 	const deletions = lines.filter((line) => line.kind === "remove").length;
-	const phase = cell.inputStreaming
+	const phaseLabel = cell.inputStreaming
 		? t("fileEdit.generating")
 		: cell.status === "running"
 			? t("fileEdit.applying")
 			: cell.status === "pending" ? t("fileEdit.pending") : null;
 
 	return (
-		<div data-file-edit={cell.toolCallId} className="overflow-hidden rounded-xl border border-border/60">
-			<div className="flex items-center gap-1.5 border-b border-border/60 px-2.5 py-1.5">
-				<FileTypeIcon name={basename} className="size-3.5 shrink-0" />
-				{cell.inputStreaming || cell.status === "running" ? (
-					<Spinner className="size-3 shrink-0 text-muted-foreground" />
-				) : null}
-				<span
-					className="min-w-0 flex-1 truncate font-mono text-[length:var(--app-font-size-ui-sm,11px)]"
-					title={preview.path}
-				>
-					{basename}
-				</span>
-				{phase ? <span className="shrink-0 text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">{phase}</span> : null}
-				<span className="inline-flex shrink-0 items-center gap-1 tabular-nums text-[length:var(--app-font-size-ui-xs,10px)]">
-					{additions > 0 ? (
-						<span className="text-success">+{additions.toLocaleString()}</span>
-					) : null}
-					{deletions > 0 ? (
-						<span className="text-destructive">−{deletions.toLocaleString()}</span>
-					) : null}
-				</span>
-			</div>
+		<div
+			data-file-edit={cell.toolCallId}
+			className={cn(CARD_CLASS_NAME, live && "tool-scan", active && "tool-enter")}
+		>
+			<ToolLine
+				phase={toolPhase(cell, active)}
+				icon={FileIcon}
+				fileIconName={basename}
+				label={t(cell.toolName === "write" ? "fileEdit.write" : "fileEdit.edit")}
+				subject={preview.path ? basename : null}
+				title={preview.path}
+				meta={
+					<>
+						{phaseLabel ? <span className="shimmer">{phaseLabel}</span> : null}
+						{additions > 0 ? <span className="text-success">+{additions.toLocaleString()}</span> : null}
+						{deletions > 0 ? <span className="text-destructive">−{deletions.toLocaleString()}</span> : null}
+					</>
+				}
+				expandable
+				open={open}
+				onClick={() => setOpen((value) => !value)}
+				className={CARD_HEADER_CLASS_NAME}
+			/>
 			<div
 				ref={bodyRef}
+				hidden={!open}
 				onScroll={(event) => {
 					const body = event.currentTarget;
 					followRef.current = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
 				}}
-				className="max-h-64 overflow-auto font-mono text-[length:var(--app-font-size-chat-code,11px)]"
+				className="max-h-64 overflow-auto border-t border-border/40 font-mono text-[length:var(--app-font-size-chat-code,11px)]"
 			>
 				{cell.inputStreaming && lines.length === 0 ? (
 					<div className="px-3 py-2 font-sans text-muted-foreground">{t("fileEdit.waitingForContent")}</div>
@@ -376,141 +381,8 @@ function FileEditCell({
 	);
 }
 
-function toolStringArg(cell: Extract<AgentCell, { type: "tool" }>, key: string): string | null {
-	const args =
-		typeof cell.args === "object" && cell.args !== null
-			? (cell.args as Record<string, unknown>)
-			: null;
-	const value = args?.[key];
-	return typeof value === "string" && value !== "" ? value : null;
-}
-
-function toolStringListArg(cell: Extract<AgentCell, { type: "tool" }>, key: string): string[] {
-	const args =
-		typeof cell.args === "object" && cell.args !== null
-			? (cell.args as Record<string, unknown>)
-			: null;
-	const value = args?.[key];
-	return Array.isArray(value)
-		? value.filter((entry): entry is string => typeof entry === "string" && entry !== "")
-		: [];
-}
-
-function pathBasename(path: string): string {
-	return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
-
-/**
- * How one tool call presents in the transcript, Codex-style: a past-tense verb
- * naming what the call did, the thing it did it to trailing in mono, and where
- * the row's click goes. Rows with a `command` echo it above the output when
- * unfolded; a row with `openPath` sends the click to the dock's Files pane
- * instead of unfolding.
- */
-interface ToolPresentation {
-	label: string;
-	subject: string | null;
-	icon: typeof HammerIcon;
-	openPath?: string;
-	command?: string;
-	/** The read row's glyph comes from the file's extension, not a fixed icon. */
-	fileIconName?: string;
-}
-
-function toolPresentation(
-	cell: Extract<AgentCell, { type: "tool" }>,
-	t: (key: TranslationKey) => string,
-): ToolPresentation {
-	const argsText = toolArgsPreview(cell.args);
-	switch (cell.toolName) {
-		case "read": {
-			const path = toolStringArg(cell, "path");
-			if (path && cell.status !== "error" && !cell.inputStreaming) {
-				const basename = pathBasename(path);
-				return {
-					label: t("tool.read"),
-					subject: basename,
-					icon: FileIcon,
-					fileIconName: basename,
-					openPath: path,
-				};
-			}
-			return { label: t("tool.read"), subject: path ?? argsText, icon: FileIcon };
-		}
-		case "bash":
-		case "powershell":
-		case "cmd": {
-			const command = toolStringArg(cell, "command");
-			return {
-				label: t("tool.ranCommand"),
-				subject: command?.split("\n", 1)[0] ?? argsText,
-				icon: TerminalIcon,
-				command: command ?? undefined,
-			};
-		}
-		case "grep":
-			return {
-				label: t("tool.searched"),
-				subject: toolStringArg(cell, "pattern") ?? argsText,
-				icon: SearchIcon,
-			};
-		case "find":
-			return {
-				label: t("tool.foundFiles"),
-				subject: toolStringArg(cell, "pattern") ?? argsText,
-				icon: SearchIcon,
-			};
-		case "ls":
-			return {
-				label: t("tool.listed"),
-				subject: toolStringArg(cell, "path") ?? ".",
-				icon: FolderIcon,
-			};
-		case "stat": {
-			const paths = toolStringListArg(cell, "paths");
-			return {
-				label: t("tool.measured"),
-				subject:
-					paths.length === 0
-						? argsText
-						: paths.length === 1
-							? pathBasename(paths[0])
-							: `${pathBasename(paths[0])} +${paths.length - 1}`,
-				icon: FileIcon,
-			};
-		}
-		default:
-			return { label: cell.toolName, subject: argsText, icon: HammerIcon };
-	}
-}
-
 const ToolCell = memo(function ToolCell({ cell, active }: { cell: Extract<AgentCell, { type: "tool" }>; active: boolean }) {
-	const { t } = useTranslation();
-	const [open, setOpen] = useState(false);
 	const view = useContext(TaskLookupContext);
-	const loadOutput = useContext(ToolOutputContext);
-	// What has been fetched beyond the head the transcript came with. Keyed by
-	// that head: a result still being written replaces it, and what was read off
-	// the old one no longer joins onto it.
-	const [fetched, setFetched] = useState<{ head: string; text: string } | null>(null);
-	const [loadingOutput, setLoadingOutput] = useState(false);
-	const extra = fetched?.head === cell.output ? fetched.text : "";
-	const shown = cell.output + extra;
-	const missing = cell.outputTotal === undefined ? 0 : cell.outputTotal - shown.length;
-	const fetchMore = () => {
-		if (!loadOutput || loadingOutput) return;
-		const head = cell.output;
-		setLoadingOutput(true);
-		void loadOutput(cell.toolCallId, shown.length)
-			.then((chunk) => {
-				setFetched((previous) => ({
-					head,
-					text: (previous?.head === head ? previous.text : "") + chunk.text,
-				}));
-			})
-			.catch(() => undefined)
-			.finally(() => setLoadingOutput(false));
-	};
 
 	// A delegation is not a tool result to unfold — it is a whole session that
 	// ran, so the row shows the worker itself rather than the JSON acknowledging
@@ -518,107 +390,15 @@ const ToolCell = memo(function ToolCell({ cell, active }: { cell: Extract<AgentC
 	const id = taskIdOf(cell);
 	const task = id ? view.tasks.get(id) : undefined;
 	if (task) return <TaskCard task={task} onOpen={view.open} />;
+	// A search is a run too: the explorer's fan-out while it works, what it
+	// found once it is done.
+	if (cell.toolName === "code_search")
+		return <FastContextCard cell={cell} run={view.explorers?.get(cell.toolCallId)} onOpenFile={view.openFile} />;
 
 	const fileEdit = cell.status === "error" ? null : fileEditPreview(cell);
 	if (fileEdit) return <FileEditCell cell={cell} preview={fileEdit} active={active} />;
 
-	const presentation = toolPresentation(cell, t);
-	const opensFile = presentation.openPath !== undefined && view.openFile !== undefined;
-
-	const hasChip = presentation.subject !== null;
-
-	return (
-		<div className="flex flex-col gap-1">
-			<button
-				type="button"
-				aria-expanded={opensFile ? undefined : open}
-				title={presentation.openPath ?? presentation.subject ?? undefined}
-				onClick={() =>
-					opensFile
-						? view.openFile?.(presentation.openPath as string)
-						: setOpen((value) => !value)
-				}
-				className="group flex w-full items-center gap-1.5 py-0.5 text-left"
-			>
-				{cell.status === "running" ? (
-					<Spinner className="size-3.5 shrink-0 text-muted-foreground" />
-				) : cell.status === "error" ? (
-					<TriangleAlertIcon className="size-3.5 shrink-0 text-destructive" />
-				) : hasChip ? null : (
-					<presentation.icon
-						className={cn("size-3.5 shrink-0", MUTED_LABEL_TEXT_CLASS_NAME)}
-					/>
-				)}
-				<span className="shrink-0 text-[length:var(--app-font-size-chat,12px)] font-medium">
-					{presentation.label}
-				</span>
-				{/* The tinted box carries what the call acted on — icon plus name —
-				    while the verb stays outside it, the way Codex reads the row. */}
-				{hasChip ? (
-					<span
-						className={cn(
-							"inline-flex min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors",
-							SOFT_SURFACE_FILL_CLASS_NAME,
-							"group-hover:bg-[var(--color-background-elevated-secondary)]",
-						)}
-					>
-						{presentation.fileIconName ? (
-							<FileTypeIcon name={presentation.fileIconName} className="size-3.5 shrink-0" />
-						) : (
-							<presentation.icon
-								className={cn("size-3.5 shrink-0", MUTED_LABEL_TEXT_CLASS_NAME)}
-							/>
-						)}
-						<span className="truncate font-mono text-[length:var(--app-font-size-ui-sm,11px)]">
-							{presentation.subject}
-						</span>
-					</span>
-				) : null}
-				<span className="flex-1" />
-				{cell.status === "pending" ? (
-					<Loader2Icon className="size-3 shrink-0 opacity-40" />
-				) : null}
-			</button>
-			{open && (presentation.command || cell.output) ? (
-				<div
-					className={cn(
-						"overflow-hidden rounded-lg border border-border/60",
-						"bg-[var(--color-token-text-code-block-background)]",
-						"font-mono text-[length:var(--app-font-size-chat-code,11px)]",
-					)}
-				>
-					{presentation.command ? (
-						<div className="whitespace-pre-wrap break-words border-b border-border/60 px-2.5 py-1.5 [overflow-wrap:anywhere]">
-							{presentation.command}
-						</div>
-					) : null}
-					{shown ? (
-						<pre className="max-h-80 overflow-auto whitespace-pre-wrap p-2.5">
-							{shown}
-						</pre>
-					) : null}
-					{missing > 0 ? (
-						<button
-							type="button"
-							className={cn(
-								"flex w-full items-center justify-center gap-1.5 border-t border-border/60 px-2.5 py-1.5",
-								"text-[length:var(--app-font-size-ui-sm,11px)]",
-								MUTED_LABEL_TEXT_CLASS_NAME,
-								loadOutput ? "hover:bg-[var(--color-background-elevated-secondary)]" : "cursor-default",
-							)}
-							disabled={!loadOutput || loadingOutput}
-							onClick={fetchMore}
-						>
-							{loadingOutput ? <Loader2Icon className="size-3 animate-spin" /> : null}
-							{loadOutput
-								? t("transcript.outputRemaining", { size: formatSize(missing) })
-								: t("transcript.outputTruncated", { size: formatSize(missing) })}
-						</button>
-					) : null}
-				</div>
-			) : null}
-		</div>
-	);
+	return <ToolCall cell={cell} active={active} onOpenFile={view.openFile} />;
 });
 
 const NoticeCell = memo(function NoticeCell({ cell }: { cell: Extract<AgentCell, { type: "notice" }> }) {
@@ -650,12 +430,12 @@ function PlanningLine() {
 }
 
 /** One line standing in for a step, for the header of a collapsed work group. */
-function workItemSummary(item: WorkItem): string {
+function workItemSummary(item: WorkItem, t: TranslateFn): string {
 	switch (item.kind) {
 		case "thinking":
 			return lastThinkingLine(item.cell.thinking);
 		case "tool":
-			return item.cell.toolName;
+			return toolSummary(item.cell, t);
 		case "notice":
 			return item.cell.text;
 	}
@@ -708,6 +488,7 @@ const WorkingBlock = memo(function WorkingBlock({
 	/** The model owes a next step that has not arrived yet. */
 	waiting: boolean;
 }) {
+	const { t } = useTranslation();
 	const [open, setOpen] = useState(true);
 	const now = useNow(active);
 	const end = active ? now : row.endedAt;
@@ -720,7 +501,7 @@ const WorkingBlock = memo(function WorkingBlock({
 		? waiting
 			? "Planning Next Step"
 			: last
-				? workItemSummary(last)
+				? workItemSummary(last, t)
 				: ""
 		: `${tools} tool ${tools === 1 ? "call" : "calls"}`;
 
@@ -732,7 +513,7 @@ const WorkingBlock = memo(function WorkingBlock({
 				onClick={() => setOpen((value) => !value)}
 				className={cn(
 					"inline-flex w-fit items-center gap-1 font-medium",
-					"text-[length:calc(var(--app-font-size-chat,12px)*1.15)]",
+					"text-[length:var(--app-font-size-chat-body,13px)]",
 					MUTED_LABEL_TEXT_CLASS_NAME,
 				)}
 			>
@@ -750,15 +531,18 @@ const WorkingBlock = memo(function WorkingBlock({
 			</button>
 			{open ? (
 				<div className="flex flex-col gap-2 border-l border-border/60 pl-3">
-					{row.items.map((item) =>
-						item.kind === "thinking" ? (
+					{workUnits(row.items, active).map((unit) => {
+						if (unit.kind === "computer")
+							return <ComputerUseCard key={unit.id} steps={unit.steps} active={active} pending={unit.pending} />;
+						const item = unit.item;
+						return item.kind === "thinking" ? (
 							<CellThinking key={item.id} cell={item.cell} />
 						) : item.kind === "tool" ? (
 							<ToolCell key={item.id} cell={item.cell} active={active} />
 						) : (
 							<NoticeCell key={item.id} cell={item.cell} />
-						),
-					)}
+						);
+					})}
 					{waiting ? <PlanningLine /> : null}
 				</div>
 			) : summary ? (
@@ -801,17 +585,21 @@ const TranscriptView = function Transcript({
 	cells,
 	streaming,
 	tasks,
+	explorers,
 	onOpenTask,
 	onOpenFile,
 	checkpoints,
 	onRestoreCheckpoint,
 	onOpenReview,
 	onLoadToolOutput,
+	onForkMessage,
 }: {
 	cells: AgentCell[];
 	streaming?: boolean;
 	/** Background workers, so a `task` row can show the worker it started. */
 	tasks?: WorkflowTask[];
+	/** Fast Context runs, so a `code_search` row can show its search live. */
+	explorers?: ExplorerRun[];
 	onOpenTask?: (taskId: string) => void;
 	/** Show a file a tool row references in the dock's Files pane. */
 	onOpenFile?: (path: string) => void;
@@ -825,12 +613,15 @@ const TranscriptView = function Transcript({
 	 * local transcript already holds every result whole.
 	 */
 	onLoadToolOutput?: (toolCallId: string, offset: number) => Promise<{ text: string; total: number }>;
+	/** Branch the conversation at a reply into a session of its own. */
+	onForkMessage?: (cellId: string) => Promise<void> | void;
 }) {
 	// The handlers come from parents that recreate them every render. Reached
 	// through a ref, they stop being a reason for every row to re-render: the
 	// context value and the memoized rows only change with what they show.
-	const handlers = useRef({ onOpenTask, onOpenFile, onRestoreCheckpoint });
-	handlers.current = { onOpenTask, onOpenFile, onRestoreCheckpoint };
+	const handlers = useRef({ onOpenTask, onOpenFile, onRestoreCheckpoint, onForkMessage });
+	handlers.current = { onOpenTask, onOpenFile, onRestoreCheckpoint, onForkMessage };
+	const forkMessage = useCallback((cellId: string) => handlers.current.onForkMessage?.(cellId), []);
 	const openTask = useCallback((taskId: string) => handlers.current.onOpenTask?.(taskId), []);
 	const openFile = useCallback((path: string) => handlers.current.onOpenFile?.(path), []);
 	const restoreCheckpoint = useCallback(
@@ -842,10 +633,13 @@ const TranscriptView = function Transcript({
 	const taskLookup = useMemo<TaskView>(
 		() => ({
 			tasks: new Map((tasks ?? []).map((task) => [task.id, task])),
+			explorers: new Map(
+				(explorers ?? []).flatMap((run) => (run.toolCallId ? [[run.toolCallId, run] as const] : [])),
+			),
 			open: canOpenTask ? openTask : undefined,
 			openFile: canOpenFile ? openFile : undefined,
 		}),
-		[tasks, canOpenTask, canOpenFile, openTask, openFile],
+		[tasks, explorers, canOpenTask, canOpenFile, openTask, openFile],
 	);
 	// Keyed by the cell the main process resolved each checkpoint onto; ones that
 	// have no cell (compacted away, or on an abandoned branch) only show in the
@@ -870,6 +664,17 @@ const TranscriptView = function Transcript({
 	// transcript. Keep this work tied to the structurally shared cell array so a
 	// scroll event does not regroup every turn in a long session.
 	const rows = useMemo(() => groupTranscriptRows(cells), [cells]);
+	// Rebuilt as cells stream, but handed on only when a title actually changed:
+	// every link in every answer reads this, and a new map per token would
+	// re-render them all.
+	const webTitlesRef = useRef<ReadonlyMap<string, string>>(new Map());
+	const webTitles = useMemo(() => {
+		const next = collectWebTitles(cells);
+		const previous = webTitlesRef.current;
+		if (next.size === previous.size && [...next].every(([key, title]) => previous.get(key) === title)) return previous;
+		webTitlesRef.current = next;
+		return next;
+	}, [cells]);
 	// A turn's edit summary hangs off its last row: the checkpoint that fronts the
 	// turn already knows which files it changed, so the card only needs to know
 	// where the turn ends. A following prompt settles that; at the tail nothing
@@ -892,6 +697,17 @@ const TranscriptView = function Transcript({
 		}
 		return cards;
 	}, [rows, checkpointByCell, streaming]);
+	// The reply each finished turn ends on: the next row is the next prompt, or
+	// there is none and nothing is still running.
+	const closingReplies = useMemo(() => {
+		const ids = new Set<string>();
+		for (let i = 0; i < rows.length; i++) {
+			if (rows[i].kind !== "message") continue;
+			const next = rows[i + 1];
+			if (next === undefined ? streaming !== true : next.kind === "user") ids.add(rows[i].id);
+		}
+		return ids;
+	}, [rows, streaming]);
 	const waiting = waitingOnModel(cells, streaming === true);
 	// An open run owns the wait: the line belongs to the work it is waiting on,
 	// and only stands alone when nothing has been done in this turn yet.
@@ -899,6 +715,7 @@ const TranscriptView = function Transcript({
 	return (
 		<TaskLookupContext.Provider value={taskLookup}>
 			<ToolOutputContext.Provider value={onLoadToolOutput}>
+			<WebTitlesContext.Provider value={webTitles}>
 			<div className="flex flex-col gap-4">
 				{rows.map((row, index) => {
 					const last = index === rows.length - 1;
@@ -914,7 +731,11 @@ const TranscriptView = function Transcript({
 									restoreDisabled={streaming === true}
 								/>
 							) : row.kind === "message" ? (
-								<MessageCell cell={row.cell} />
+								<MessageCell
+									cell={row.cell}
+									closesTurn={closingReplies.has(row.id)}
+									onFork={onForkMessage ? forkMessage : undefined}
+								/>
 							) : row.kind === "thinking" ? (
 								<CellThinking cell={row.cell} />
 							) : row.kind === "notice" ? (
@@ -940,6 +761,7 @@ const TranscriptView = function Transcript({
 				})}
 				{waiting && !waitingInWork ? <PlanningLine /> : null}
 			</div>
+			</WebTitlesContext.Provider>
 			</ToolOutputContext.Provider>
 		</TaskLookupContext.Provider>
 	);

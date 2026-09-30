@@ -30,6 +30,7 @@ export function useAppearanceVariables(input: {
 			"--app-font-size-ui-meta": `${scale.uiMetaPx}px`,
 			"--app-font-size-ui-timestamp": `${scale.uiTimestampPx}px`,
 			"--app-font-size-chat": `${scale.chatPx}px`,
+			"--app-font-size-chat-body": `${scale.chatBodyPx}px`,
 			"--app-font-size-chat-code": `${scale.chatCodePx}px`,
 			"--app-font-size-chat-meta": `${scale.chatMetaPx}px`,
 			"--app-font-size-chat-tiny": `${scale.chatTinyPx}px`,

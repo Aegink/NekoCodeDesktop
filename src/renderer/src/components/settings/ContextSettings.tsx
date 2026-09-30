@@ -196,7 +196,9 @@ export function ContextSettings({ cwd, projects }: { cwd: string | null; project
 					{others.map((file) => (
 						<div key={file.path} className="flex items-center gap-2 py-1">
 							<div className="flex min-w-0 flex-1 flex-col">
-								<span className="text-[length:var(--app-font-size-ui,12px)]">{t("context.instructions.ancestor")}</span>
+								<span className="text-[length:var(--app-font-size-ui,12px)]">
+									{t(file.scope === "imported" ? "context.instructions.imported" : "context.instructions.ancestor")}
+								</span>
 								<span className="truncate font-mono text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground" title={file.path}>
 									{file.path}
 								</span>

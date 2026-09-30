@@ -11,6 +11,7 @@ function fixture() {
 	const disk = new Map<string, SessionSummary>();
 	/** Set to make the next `send` refuse its prompt, the way no configured model would. */
 	let refuseNext: string | null = null;
+	const board = { changes: 0 };
 	class FakeAgent {
 		snapshot: AgentSnapshot | null = null;
 		closed = false;
@@ -23,7 +24,7 @@ function fixture() {
 			const id = `task-${++nextId}`;
 			this.snapshot = {
 				session: { id, cwd, sessionFile: `/sessions/${id}.jsonl`, title: id, titlePending: false, preview: "", createdAt: Date.now(), updatedAt: Date.now(), messageCount: 0 },
-				cells: [], checkpoints: [], fastContext: { modelKey: null, thinkingLevel: "low" }, workflow: { request: null, todos: [], tasks: [] }, streaming: false,
+				cells: [], checkpoints: [], workflow: { request: null, todos: [], tasks: [] }, streaming: false,
 				models: [], modelKey: null, thinkingLevel: "off", thinkingLevels: ["off"], mode: "auto", workMode: "agent", agentPhase: "execute",
 			};
 			this.emit("agent:snapshot", this.snapshot);
@@ -59,9 +60,9 @@ function fixture() {
 	}
 	const manager = new TaskManager((emit, owner) => {
 		const agent = new FakeAgent(emit, owner); agents.push(agent); return agent as unknown as AgentService;
-	}, (channel, payload) => events.push({ channel, payload }));
+	}, (channel, payload) => events.push({ channel, payload }), undefined, undefined, () => { board.changes++; });
 	return {
-		manager, agents, events, disk,
+		manager, agents, events, disk, board,
 		fake: (agent: AgentService) => agent as unknown as FakeAgent,
 		/** The most recently made agent — what a background start just created. */
 		last: () => agents[agents.length - 1],
@@ -185,6 +186,48 @@ describe("parallel task execution", () => {
 	});
 });
 
+describe("task board", () => {
+	test("lists sessions once they run, not when they are only opened to be read", async () => {
+		const f = fixture();
+		const reading = f.fake(await f.manager.create("/project"));
+		expect(f.manager.board()).toEqual([]);
+
+		const result = await f.manager.startBackground("/project", "修复登录重定向");
+		if (!result.accepted) throw new Error("expected the task to start");
+		const board = f.manager.board((id) => (id === result.session.id ? { branch: "nekocode/task-1", base: "main" } : null));
+		expect(board.map((entry) => entry.sessionId)).toEqual([result.session.id]);
+		expect(board[0]).toMatchObject({ status: "running", title: "修复登录重定向", selected: false, worktree: { branch: "nekocode/task-1" } });
+		expect(reading.snapshot!.streaming).toBe(false);
+		expect(f.board.changes).toBeGreaterThan(0);
+	});
+
+	test("stopping one task leaves the others running, and it stays on the board until dismissed", async () => {
+		const f = fixture();
+		await f.manager.create("/project");
+		const one = await f.manager.startBackground("/project", "补充单元测试");
+		const two = await f.manager.startBackground("/project", "升级依赖");
+		if (!one.accepted || !two.accepted) throw new Error("expected both tasks to start");
+
+		await f.manager.abortSession(one.session.id);
+		const board = f.manager.board();
+		expect(board.find((e) => e.sessionId === one.session.id)?.status).toBe("done");
+		expect(board.find((e) => e.sessionId === one.session.id)?.endedAt).not.toBeNull();
+		expect(board.find((e) => e.sessionId === two.session.id)?.status).toBe("running");
+
+		// A running task is not dismissed along with the finished one.
+		f.manager.dismiss([one.session.id, two.session.id]);
+		expect(f.manager.board().map((e) => e.sessionId)).toEqual([two.session.id]);
+	});
+
+	test("a deleted task leaves the board", async () => {
+		const f = fixture();
+		const result = await f.manager.startBackground("/project", "整理一下 README");
+		if (!result.accepted) throw new Error("expected the task to start");
+		await f.manager.remove(result.session.sessionFile);
+		expect(f.manager.board()).toEqual([]);
+	});
+});
+
 describe("desktop transcript window", () => {
 	const userCell = (i: number): AgentCell => ({ id: `u${String(i)}`, type: "user", text: `prompt ${String(i)}`, timestamp: i });
 	const cells = (count: number, from = 0) => Array.from({ length: count }, (_, i) => userCell(from + i));
@@ -267,5 +310,47 @@ describe("desktop transcript window", () => {
 		agent.emit("agent:snapshot", agent.snapshot);
 		for (const event of f.events.filter((e) => e.channel === "agent:snapshot"))
 			expect((event.payload as AgentSnapshot).cells.length).toBeLessThanOrEqual(DESKTOP_LIMITS.window);
+	});
+});
+
+describe("split panes", () => {
+	test("watched sessions stream to their panes without moving the selection", async () => {
+		const f = fixture();
+		const desktop = f.fake(await f.manager.create("/project"));
+		const other = f.fake(await f.manager.create("/project", false));
+		const views = await f.manager.watch([desktop.snapshot!.session, other.snapshot!.session]);
+		expect(views.map((view) => view.session.id)).toEqual([desktop.snapshot!.session.id, other.snapshot!.session.id]);
+		f.events.length = 0;
+		other.run();
+		desktop.run();
+		expect(f.manager.active).toBe(desktop as unknown as AgentService);
+		expect(f.events.filter((e) => e.channel === "agent:paneSnapshot").map((e) => (e.payload as AgentSnapshot).session.id))
+			.toEqual([other.snapshot!.session.id]);
+		expect(f.events.filter((e) => e.channel === "agent:snapshot").map((e) => (e.payload as AgentSnapshot).session.id))
+			.toEqual([desktop.snapshot!.session.id]);
+	});
+
+	test("the pane losing focus is brought up to date before the new selection arrives", async () => {
+		const f = fixture();
+		const first = f.fake(await f.manager.create("/project"));
+		const second = f.fake(await f.manager.create("/project", false));
+		await f.manager.watch([first.snapshot!.session, second.snapshot!.session]);
+		f.events.length = 0;
+		await f.manager.open(second.snapshot!.session);
+		expect(f.events.map((e) => [e.channel, (e.payload as AgentSnapshot).session.id])).toEqual([
+			["agent:paneSnapshot", first.snapshot!.session.id],
+			["agent:snapshot", second.snapshot!.session.id],
+		]);
+	});
+
+	test("a session left out of the panes stops streaming to them", async () => {
+		const f = fixture();
+		await f.manager.create("/project");
+		const other = f.fake(await f.manager.create("/project", false));
+		await f.manager.watch([other.snapshot!.session]);
+		await f.manager.watch([]);
+		f.events.length = 0;
+		other.run();
+		expect(f.events.some((e) => e.channel === "agent:paneSnapshot")).toBe(false);
 	});
 });

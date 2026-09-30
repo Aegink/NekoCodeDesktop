@@ -10,6 +10,7 @@ import {
 	SIDEBAR_ROW_LABEL_TEXT_CLASS_NAME,
 } from "../../lib/sidebarRowStyles";
 import { cn } from "../../lib/utils";
+import { startSessionDrag } from "../../lib/sessionDrag";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../ui/menu";
 
@@ -17,6 +18,8 @@ export interface SessionRowProps {
 	hideActions?: boolean;
 	compact?: boolean;
 	disabled?: boolean;
+	/** The row can be carried to the chat area to open beside what is there. */
+	draggable?: boolean;
 	session: SessionSummary;
 	active: boolean;
 	/** The active session is mid-run: the row shows a live indicator. */
@@ -136,6 +139,8 @@ export function SessionRow(props: SessionRowProps) {
 				aria-current={active ? "page" : undefined}
 				title={session.preview ? `${title}\n${session.preview}` : title}
 				onClick={props.onOpen}
+				draggable={props.draggable && !props.disabled}
+				onDragStart={props.draggable ? (event) => startSessionDrag(event, session, title) : undefined}
 				className={cn(
 					"flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2 py-1.5 text-left",
 					SIDEBAR_ROW_FOCUS_CLASS_NAME,

@@ -2,11 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import type { SshHost } from "../../../shared/ssh";
 import { api, errorMessage } from "../api";
 import { useTranslation } from "../i18n";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { XIcon } from "../lib/icons";
+
+const LOCAL = "__local__";
 
 export function TerminalPanel({
 	cwd,
@@ -25,11 +29,22 @@ export function TerminalPanel({
 	const sessionIdRef = useRef<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [height, setHeight] = useState(240);
+	const [servers, setServers] = useState<SshHost[]>([]);
+	/** A saved SSH host's id, or null for a shell on this machine. */
+	const [target, setTarget] = useState<string | null>(null);
 
 	useEffect(() => {
-		if (!cwd) return;
+		if (api.runtime === "web") return;
+		api.sshStatus().then((status) => setServers(status.hosts)).catch(() => {});
+	}, []);
+	const server = target ? servers.find((entry) => entry.id === target) : undefined;
+
+	useEffect(() => {
+		// A remote shell needs no project; a local one starts in it.
+		if (!cwd && !target) return;
 		const host = hostRef.current;
 		if (!host) return;
+		setError(null);
 
 		const terminal = new Terminal({
 			fontFamily: "var(--font-mono-family, ui-monospace, monospace)",
@@ -54,8 +69,9 @@ export function TerminalPanel({
 			}
 		});
 
+		if (target) terminal.write(`${t("terminal.connecting")}\r\n`);
 		api
-			.terminalCreate({ cwd, cols: terminal.cols, rows: terminal.rows })
+			.terminalCreate({ cwd: cwd ?? "", cols: terminal.cols, rows: terminal.rows, ...(target ? { sshHostId: target } : {}) })
 			.then((session) => {
 				if (disposed) {
 					void api.terminalKill(session.id);
@@ -90,7 +106,7 @@ export function TerminalPanel({
 			terminalRef.current = null;
 			fitRef.current = null;
 		};
-	}, [cwd, t]);
+	}, [cwd, t, target]);
 
 	return (
 		<div
@@ -103,8 +119,28 @@ export function TerminalPanel({
 			style={docked ? undefined : { height }}
 		>
 			<div className="flex h-8 shrink-0 items-center gap-2 px-2">
-				<span className="text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">
-					{t("terminal.title")} {cwd ? `— ${cwd}` : ""}
+				{servers.length ? (
+					<Select
+						value={target ?? LOCAL}
+						onValueChange={(value) => setTarget(value && value !== LOCAL ? String(value) : null)}
+					>
+						<SelectTrigger aria-label={t("terminal.target")} className="h-6 w-auto min-w-0 max-w-48" size="sm" variant="ghost">
+							<SelectValue>{server ? server.name : t("terminal.local")}</SelectValue>
+						</SelectTrigger>
+						<SelectPopup surface="settings">
+							<SelectItem value={LOCAL}>{t("terminal.local")}</SelectItem>
+							{servers.map((entry) => (
+								<SelectItem key={entry.id} value={entry.id}>
+									{entry.name}
+								</SelectItem>
+							))}
+						</SelectPopup>
+					</Select>
+				) : null}
+				<span className="min-w-0 truncate text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">
+					{server
+						? `SSH — ${server.username}@${server.host}${server.remoteDir ? `:${server.remoteDir}` : ""}`
+						: `${t("terminal.title")} ${cwd ? `— ${cwd}` : ""}`}
 				</span>
 				<div className="flex-1" />
 				<Button onClick={onClose} size="icon-chip" variant="ghost">

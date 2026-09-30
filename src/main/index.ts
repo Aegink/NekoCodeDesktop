@@ -10,7 +10,8 @@ import type { AcpToolServers } from "./acp/session";
 import { McpToolServer } from "./mcp/tool-server";
 import { createWebsiteCloneTools, resolveWebsiteCloneTemplateDir } from "./website-clone-tools";
 import { devServers } from "./website-clone-dev-server";
-import { piAi } from "./pi";
+import { pi, piAi } from "./pi";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { ComputerUseService } from "./computer/service";
 import { CursorOverlay } from "./computer/cursor-overlay";
 import { QqBotService } from "./qqbot/service";
@@ -24,14 +25,14 @@ import type {
 	RelayResendRequest,
 	RelayVerifyRequest,
 } from "../shared/relay";
-import type { FastContextConfig } from "../shared/fast-context";
 import type { FusionConfig } from "../shared/fusion";
+import type { TaskBoardEntry } from "../shared/task-board";
 import appIconPng from "../../resources/icons/icon.png?asset";
 import appIconIco from "../../resources/icons/icon.ico?asset";
-import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, safeStorage, session, shell, utilityProcess } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, safeStorage, session, shell, utilityProcess } from "electron";
 import { existsSync, statSync } from "node:fs";
 import { readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { extname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { AgentService } from "./agent-service";
 import { migrateAgentHome } from "./agent-home";
 import { AutomationService } from "./automation/service";
@@ -40,7 +41,19 @@ import type { BrowserInspector } from "./browser-inspector";
 
 let browserInspector: BrowserInspector | undefined;
 import { GitHubAuthService } from "./github-auth";
-import { applyAction, getDiff, getStatus, initRepo, listScopeFiles } from "./git";
+import { applyAction, getDiff, getStatus, initRepo, listScopeFiles, showHeadFile, commitChanges } from "./git";
+import { listProjectFiles, rankPaths } from "./mentions";
+import {
+	createEntry,
+	deletableTarget,
+	readTextFile,
+	renameEntry,
+	searchProject,
+	statFiles,
+	writeTextFile,
+} from "./workspace-files";
+import type { IdeCreateRequest, IdeRenameRequest, IdeSearchRequest, IdeWriteRequest } from "../shared/ide";
+import { IdeExtensionStore } from "./ide-extensions";
 import { ModelConfigService } from "./model-config-service";
 import { OAuthService, oauthLoginOptions } from "./oauth-service";
 import { AntigravityOAuthService } from "./antigravity-oauth-service";
@@ -65,6 +78,7 @@ import type {
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ForkSessionRequest,
 	OpenSessionRequest,
 	RenameSessionRequest,
 	SendPromptRequest,
@@ -83,6 +97,22 @@ import type {
 } from "../shared/skills";
 import type { AppPreferences, CommandShellOption } from "../shared/preferences";
 import { configureCommandShell, listCommandShells } from "./command-shell";
+import { configureWebTools, createWebTools, webToolsEnabled } from "./web-tools";
+import { codexWebSearch, geminiWebSearch, type CodexSearchAuth } from "./native-search";
+import type { AccountSearchEngineId } from "../shared/web-tools";
+import { createAstGrepTool } from "./ast-tools";
+import { createGithubTool } from "./github-tool";
+import { createStatTool } from "./file-tools";
+import { WebToolsStore } from "./web-tools-store";
+import { SshStore } from "./ssh-store";
+import { SshService } from "./ssh-service";
+import { configureSshTool } from "./ssh-tool";
+import { RemoteDesktopService } from "./remote-desktop/service";
+import { configureRemoteDesktopTool, type DesktopImageEncoder } from "./remote-desktop/tool";
+import type { DesktopController, DesktopKeyInput, DesktopPointerInput } from "../shared/remote-desktop";
+import { faviconFor } from "./favicon";
+import { configureGithubTool } from "./github-tool";
+import type { WebToolsUpdate } from "../shared/web-tools";
 import type {
 	WorktreeMergeRequest,
 	WorktreeMergeResult,
@@ -163,8 +193,86 @@ let taskManager: TaskManager | null = null;
 let taskNotifier: TaskNotifier | null = null;
 /** Outlives the window: preferences are read again when one is reopened. */
 let preferences: AppPreferencesStore | null = null;
+let webToolsStore: WebToolsStore | null = null;
+/** Lazily, as safeStorage is only usable once the app is ready and the keyring settled. */
+function webTools(): WebToolsStore {
+	webToolsStore ??= new WebToolsStore(app.getPath("userData"), safeStorage);
+	return webToolsStore;
+}
+let sshState: { store: SshStore; service: SshService } | null = null;
+/** Lazily for the same reason; window-independent, since saved hosts outlive a window. */
+function ssh(): { store: SshStore; service: SshService } {
+	if (!sshState) {
+		const store = new SshStore(app.getPath("userData"), safeStorage);
+		sshState = { store, service: new SshService(store) };
+	}
+	return sshState;
+}
+let remoteDesktops: RemoteDesktopService | null = null;
+/** One VNC connection per host, shared by the agent and the panel in every window. */
+function desktops(): RemoteDesktopService {
+	remoteDesktops ??= new RemoteDesktopService({
+		connect: (hostId) => ssh().service.dedicated(hostId),
+		emit: (channel, payload) => {
+			for (const window of BrowserWindow.getAllWindows())
+				if (!window.isDestroyed()) window.webContents.send(channel, payload);
+		},
+	});
+	return remoteDesktops;
+}
+/**
+ * The desktop as the model sees it: a region of the framebuffer, scaled, as
+ * JPEG. Only the region is converted — to BGRA, which is what nativeImage takes.
+ */
+const encodeDesktop: DesktopImageEncoder = (rgba, width, _height, region, target) => {
+	const bgra = Buffer.allocUnsafe(region.width * region.height * 4);
+	for (let row = 0; row < region.height; row++) {
+		let source = ((region.y + row) * width + region.x) * 4;
+		let out = row * region.width * 4;
+		for (let col = 0; col < region.width; col++, source += 4, out += 4) {
+			bgra[out] = rgba[source + 2];
+			bgra[out + 1] = rgba[source + 1];
+			bgra[out + 2] = rgba[source];
+			bgra[out + 3] = 255;
+		}
+	}
+	let image = nativeImage.createFromBitmap(bgra, { width: region.width, height: region.height });
+	if (target.width !== region.width || target.height !== region.height) image = image.resize({ ...target, quality: "good" });
+	return { data: image.toJPEG(85).toString("base64"), mimeType: "image/jpeg" };
+};
 /** Also window-independent — a task checkout survives the window that made it. */
 let worktrees: WorktreeService | null = null;
+
+const CODEX_PROVIDER = "openai-codex";
+/** Fast, and grounded search is what it is for; the answer is only a summary of the sources. */
+const GEMINI_SEARCH_MODEL = "gemini-3-flash";
+/** Whether each account search engine can run; set once the window's services exist. */
+let webSearchAccounts: () => Promise<Record<AccountSearchEngineId, boolean>> = async () => ({ codex: false, gemini: false });
+
+/** The task board as it stands, each task's worktree branch included. */
+function taskBoard(): TaskBoardEntry[] {
+	if (!taskManager) return [];
+	const checkouts = (worktrees ??= new WorktreeService(app.getPath("userData")));
+	return taskManager.board((sessionId) => checkouts.forSession(sessionId));
+}
+
+/**
+ * How often the board is re-sent while tasks run. Every streamed token is a
+ * snapshot; the board only needs to keep a status line and a clock current.
+ */
+const TASK_BOARD_PUSH_MS = 250;
+let taskBoardTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Send the board to every window soon, coalescing the changes until then into one push. */
+function pushTaskBoard(): void {
+	if (taskBoardTimer) return;
+	taskBoardTimer = setTimeout(() => {
+		taskBoardTimer = null;
+		const board = taskBoard();
+		for (const open of BrowserWindow.getAllWindows())
+			if (!open.isDestroyed()) open.webContents.send("agent:tasks", board);
+	}, TASK_BOARD_PUSH_MS);
+}
 /** Servers are processes: one set for the app, not one per window or session. */
 let mcpService: McpService | null = null;
 /** External ACP agents are processes too, and outlive any one window. */
@@ -176,6 +284,13 @@ let toolServer: McpToolServer | null = null;
  * The tools an ACP session gets: the ones NekoLocal has — the browser panel,
  * Computer Use when it is switched on, the MCP servers configured in NekoCode —
  * built by the same factories, so both workspaces run one implementation.
+ *
+ * NekoLocal's read-only code tools ride along: file reading and search,
+ * structural search, GitHub, and web access when it is switched on. Agents
+ * differ in what they bring — Codex reads the repository through its shell —
+ * and these give every agent the same vocabulary. Nothing here writes: an
+ * agent's own permission mode or sandbox cannot see a tool served from
+ * outside it, so a write tool here would be a way around it.
  */
 async function acpToolServers(session: { sessionId: string; cwd: string }): Promise<AcpToolServers> {
 	toolServer ??= new McpToolServer({
@@ -203,8 +318,28 @@ async function acpToolServers(session: { sessionId: string; cwd: string }): Prom
 				},
 			})
 		: [];
+	const { createFindToolDefinition, createGrepToolDefinition, createLsToolDefinition, createReadToolDefinition } = await pi();
+	// Each carries its own parameter type; `any` is how pi itself holds a mixed set (its `ToolDef`).
+	const codeTools: ToolDefinition<any, any>[] = [
+		createReadToolDefinition(session.cwd),
+		createGrepToolDefinition(session.cwd),
+		createFindToolDefinition(session.cwd),
+		createLsToolDefinition(session.cwd),
+		createStatTool(session.cwd),
+		createAstGrepTool(session.cwd),
+		createGithubTool(session.cwd),
+	];
+	const webTools = createWebTools();
 	const handle = await toolServer.register({
-		tools: () => [...browserTools, ...(computerUse?.tools() ?? []), ...(mcpService?.tools() ?? [])],
+		tools: () => [
+			...codeTools,
+			// Read per request, like the rest: switching web access off in
+			// settings takes the tools away from a running session at once.
+			...(webToolsEnabled() ? webTools : []),
+			...browserTools,
+			...(computerUse?.tools() ?? []),
+			...(mcpService?.tools() ?? []),
+		],
 	});
 	return {
 		servers: [{ type: "http", name: "nekocode", url: handle.url, headers: handle.headers }],
@@ -343,6 +478,8 @@ async function startBackgroundTask(
 		return result;
 	}
 	worktrees.attach(result.session.id, result.session.sessionFile, workspace.worktree);
+	// The task went on the board before its checkout was recorded against it.
+	if (workspace.worktree) pushTaskBoard();
 	return { ...result, ...(workspace.warning ? { warning: workspace.warning } : {}) };
 }
 
@@ -583,6 +720,47 @@ function createWindow(): void {
 	preferences ??= new AppPreferencesStore(app.getPath("userData"));
 	// Read per session, so a change applies to the next one without a restart.
 	configureCommandShell(() => preferences?.get().commandShell ?? "auto");
+	// The account search engines borrow the model sign-ins; see native-search.ts.
+	const codexSearchAuth = async (): Promise<CodexSearchAuth | null> => {
+		const runtime = await taskManager?.active.getModelRuntime();
+		if (!runtime) return null;
+		const status = runtime.getProviderAuthStatus(CODEX_PROVIDER);
+		if (!(status.configured && status.source === "stored")) return null;
+		const token = (await runtime.getAuth(CODEX_PROVIDER))?.auth.apiKey;
+		if (!token) return null;
+		// The model on screen when it is a Codex one — the account demonstrably
+		// has it — otherwise the first the catalog lists.
+		const models = runtime.getModels(CODEX_PROVIDER).map((model) => model.id);
+		const active = taskManager?.active.getSnapshot()?.modelKey ?? "";
+		const onScreen = active.startsWith(`${CODEX_PROVIDER}/`) ? active.slice(CODEX_PROVIDER.length + 1) : null;
+		const model = onScreen && models.includes(onScreen) ? onScreen : models[0];
+		return model ? { accessToken: token, model } : null;
+	};
+	webSearchAccounts = async () => ({
+		codex: (await codexSearchAuth().catch(() => null)) !== null,
+		gemini: antigravity.list().signedIn,
+	});
+	configureWebTools(() => ({
+		...webTools().settings(),
+		native: {
+			codex: async (request) => {
+				const auth = await codexSearchAuth();
+				if (!auth) throw new Error("OpenAI Codex is not signed in");
+				return codexWebSearch(request, auth);
+			},
+			gemini: async (request) => {
+				const context = await antigravity.requestContext(request.signal);
+				return geminiWebSearch(request, {
+					projectId: context.projectId,
+					model: GEMINI_SEARCH_MODEL,
+					send: (payload) => antigravity.sendModelRequest(payload, context),
+				});
+			},
+		},
+	}));
+	configureGithubTool(() => githubAuth);
+	configureSshTool(ssh);
+	configureRemoteDesktopTool(() => ({ store: ssh().store, service: desktops(), encode: encodeDesktop }));
 	taskNotifier = new TaskNotifier(win, preferences.get().notifyOnTaskFinish, (session) => {
 		if (!win.isDestroyed()) win.webContents.send("agent:revealSession", session);
 	});
@@ -627,7 +805,8 @@ function createWindow(): void {
 		},
 		// Progress, not just completion: QQ streams a run as it happens and has to
 		// relay a workflow question the moment it blocks the task.
-		(snapshot) => qqBotService?.progress(snapshot));
+		(snapshot) => qqBotService?.progress(snapshot),
+		pushTaskBoard);
 	// After the manager exists, so a stdio server's cwd can resolve to the open
 	// project rather than to the fallback.
 	void mcpService.refresh();
@@ -654,7 +833,7 @@ function createWindow(): void {
 			if (!win.isDestroyed()) win.webContents.send("oauth:event", event);
 		},
 	});
-	terminalService = new TerminalService(win);
+	terminalService = new TerminalService(win, () => ssh().service);
 
 	if (!githubAuth) githubAuth = new GitHubAuthService();
 	if (!pullRequests) pullRequests = new PullRequestService(githubAuth);
@@ -700,6 +879,14 @@ function createWindow(): void {
 	win.webContents.setWindowOpenHandler(({ url }) => {
 		void shell.openExternal(url);
 		return { action: "deny" };
+	});
+	// The window is the app, never a page: a link that slips past the renderer's
+	// own handling would otherwise replace the whole UI with the site. A reload
+	// stays on the app's own URL and passes; a web link goes to the system browser.
+	win.webContents.on("will-navigate", (event, url) => {
+		if (url.split("#")[0] === win.webContents.getURL().split("#")[0]) return;
+		event.preventDefault();
+		if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
 	});
 }
 
@@ -825,6 +1012,57 @@ function registerIpc(): void {
 			};
 		},
 	);
+	// The IDE layout's editor and explorer. Same root check as the Files pane.
+	ipcMain.handle("ide:readText", (_e, cwd: string, relPath: string) => readTextFile(cwd, relPath));
+	ipcMain.handle("ide:writeText", (_e, request: IdeWriteRequest) => writeTextFile(request));
+	ipcMain.handle("ide:create", (_e, request: IdeCreateRequest) => createEntry(request));
+	ipcMain.handle("ide:rename", (_e, request: IdeRenameRequest) => renameEntry(request));
+	// To the recycle bin: an explorer delete is one misclick from the wrong file.
+	ipcMain.handle("ide:delete", (_e, cwd: string, relPath: string) => shell.trashItem(deletableTarget(cwd, relPath)));
+	ipcMain.handle("ide:stat", (_e, cwd: string, relPaths: string[]) =>
+		statFiles(cwd, Array.isArray(relPaths) ? relPaths.slice(0, 500) : []),
+	);
+	ipcMain.handle("ide:quickOpen", async (_e, cwd: string, query: string) => {
+		const files = await listProjectFiles(cwd);
+		return rankPaths(files, query, 60)
+			.filter((candidate) => candidate.kind === "file")
+			.map((candidate) => candidate.path);
+	});
+	ipcMain.handle("ide:search", async (_e, request: IdeSearchRequest) =>
+		searchProject(await listProjectFiles(request.cwd), request),
+	);
+	ipcMain.handle("ide:gitHead", (_e, cwd: string, relPath: string) => showHeadFile(cwd, relPath));
+	// VS Code extensions for the IDE: data only, applied by the renderer.
+	const ideExtensions = new IdeExtensionStore(join(app.getPath("userData"), "ide-extensions"));
+	ideExtensions.cleanStaging();
+	ipcMain.handle("ideExt:list", (_e, locale: unknown) => {
+		if (typeof locale === "string") ideExtensions.setLocale(locale);
+		return ideExtensions.snapshot();
+	});
+	ipcMain.handle("ideExt:search", (_e, query: unknown) => ideExtensions.search(typeof query === "string" ? query : ""));
+	ipcMain.handle("ideExt:install", (_e, id: string) => ideExtensions.install(id));
+	ipcMain.handle("ideExt:installVsix", async (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (!win) return null;
+		const picked = await dialog.showOpenDialog(win, {
+			title: "从 VSIX 安装扩展",
+			properties: ["openFile"],
+			filters: [{ name: "VS Code 扩展", extensions: ["vsix"] }],
+		});
+		const file = picked.filePaths[0];
+		if (picked.canceled || !file) return null;
+		return ideExtensions.installVsix(await readFile(file));
+	});
+	ipcMain.handle("ideExt:uninstall", (_e, id: string) => ideExtensions.uninstall(id));
+	ipcMain.handle("ideExt:setEnabled", (_e, id: string, enabled: boolean) => ideExtensions.setEnabled(id, enabled === true));
+	ipcMain.handle("ideExt:readFile", (_e, id: string, relPath: string) => ideExtensions.readFile(id, relPath));
+	// The regex engine TextMate grammars need, as wasm. Read here and handed
+	// over: the page is a `file://` URL in a packaged build, which its own
+	// `fetch` cannot read, and bundling the binary would put it in the JS.
+	ipcMain.handle("ideExt:oniguruma", () => readFile(join(dirname(require.resolve("vscode-oniguruma")), "onig.wasm")));
+	ipcMain.handle("ide:gitCommit", (_e, cwd: string, message: string, all: boolean) =>
+		commitChanges(cwd, String(message ?? ""), all === true),
+	);
 	ipcMain.handle("directory:list", (_e, path: unknown) => listHostDirectories(path));
 	ipcMain.handle("lan:addProjectPath", (_e, path: unknown) => {
 		if (typeof path !== "string" || !path || path.length > 4096 || !lanService) {
@@ -910,6 +1148,25 @@ function registerIpc(): void {
 	ipcMain.handle("agent:open", (_e, req: OpenSessionRequest) =>
 		taskManager?.open(req).then((agent) => taskManager?.viewOf(agent) ?? null),
 	);
+	ipcMain.handle("agent:watchPanes", (_e, reqs: unknown) => {
+		if (!Array.isArray(reqs) || reqs.length > 4 || !reqs.every((req) =>
+			req && typeof req === "object" && typeof req.cwd === "string" && typeof req.sessionFile === "string")) {
+			throw new Error("Invalid pane request");
+		}
+		return taskManager?.watch(reqs as OpenSessionRequest[]) ?? [];
+	});
+	// The branch is written beside the session on screen, then opened like any
+	// other: the original stays in the sidebar, untouched, to go back to.
+	ipcMain.handle("agent:fork", async (_e, req: ForkSessionRequest) => {
+		if (!req || typeof req !== "object" || typeof req.cellId !== "string" ||
+			(req.title !== undefined && typeof req.title !== "string")) {
+			throw new Error("Invalid fork request");
+		}
+		const manager = taskManager;
+		if (!manager) return null;
+		const target = await manager.active.forkAt(req);
+		return manager.open(target).then((agent) => manager.viewOf(agent));
+	});
 	/**
 	 * A snapshot on its way back to the window, cut to the window's view of it.
 	 * Every handler that answers with the selected session's snapshot goes
@@ -944,13 +1201,27 @@ function registerIpc(): void {
 		worktrees ??= new WorktreeService(app.getPath("userData"));
 		return worktrees.list();
 	});
-	ipcMain.handle("worktree:merge", (_e, req: WorktreeMergeRequest): Promise<WorktreeMergeResult> => {
+	// Both take a branch off the board's rows, so the board is re-sent after.
+	ipcMain.handle("worktree:merge", async (_e, req: WorktreeMergeRequest): Promise<WorktreeMergeResult> => {
 		worktrees ??= new WorktreeService(app.getPath("userData"));
-		return worktrees.merge(req);
+		const result = await worktrees.merge(req);
+		pushTaskBoard();
+		return result;
 	});
-	ipcMain.handle("worktree:discard", (_e, sessionId: string): Promise<void> => {
+	ipcMain.handle("worktree:discard", async (_e, sessionId: string): Promise<void> => {
 		worktrees ??= new WorktreeService(app.getPath("userData"));
-		return worktrees.discard(sessionId);
+		await worktrees.discard(sessionId);
+		pushTaskBoard();
+	});
+
+	ipcMain.handle("agent:tasks", (): TaskBoardEntry[] => taskBoard());
+	ipcMain.handle("agent:abortTask", (_e, sessionId: string) => {
+		if (typeof sessionId !== "string") throw new Error("Invalid session id");
+		return taskManager?.abortSession(sessionId);
+	});
+	ipcMain.handle("agent:dismissTasks", (_e, sessionIds: unknown) => {
+		if (!Array.isArray(sessionIds) || !sessionIds.every((id) => typeof id === "string")) throw new Error("Invalid session ids");
+		taskManager?.dismiss(sessionIds);
 	});
 
 	ipcMain.handle("mcp:list", (): McpSnapshot => {
@@ -1071,9 +1342,6 @@ function registerIpc(): void {
 	ipcMain.handle("preferences:commandShells", (): CommandShellOption[] => listCommandShells());
 	ipcMain.handle("agent:abort", () => taskManager?.active.abort());
 	ipcMain.handle("agent:setFusion", (_e, config: FusionConfig) => toWindow(taskManager?.active.setFusion(config)));
-	ipcMain.handle("agent:setFastContext", (_e, config: FastContextConfig) =>
-		toWindow(taskManager?.active.setFastContext(config)),
-	);
 	ipcMain.handle("agent:setModel", (_e, modelKey: string) =>
 		toWindow(taskManager?.active.setModel(modelKey)),
 	);
@@ -1241,6 +1509,12 @@ function registerIpc(): void {
 
 	ipcMain.handle("settings:proxyStatus", () => proxyService?.current());
 	ipcMain.handle("settings:saveProxy", (_e, manual: string | null) => proxyService?.save(manual));
+	ipcMain.handle("settings:webToolsStatus", async () => ({ ...webTools().status(), accounts: await webSearchAccounts() }));
+	ipcMain.handle("settings:saveWebTools", async (_e, patch: WebToolsUpdate) => ({
+		...webTools().update(patch ?? {}),
+		accounts: await webSearchAccounts(),
+	}));
+	ipcMain.handle("web:favicon", (_e, url: unknown) => (typeof url === "string" ? faviconFor(url) : null));
 
 	ipcMain.handle("oauth:list", () => oauthService?.list());
 	ipcMain.handle("oauth:refresh", (_e, id: string) => oauthService?.refresh(id));
@@ -1272,6 +1546,63 @@ function registerIpc(): void {
 		return githubAuth.save(token);
 	});
 	ipcMain.handle("github:clear", () => githubAuth?.clear());
+
+	ipcMain.handle("ssh:status", () => ssh().store.status());
+	ipcMain.handle("ssh:save", (_e, input: unknown) => {
+		const { store, service } = ssh();
+		const status = store.save(input);
+		// An edit may change where or as whom it connects; the pooled link is stale either way.
+		const id = (input as { id?: unknown } | null)?.id;
+		if (typeof id === "string") {
+			service.disconnect(id);
+			remoteDesktops?.disconnect(id);
+		}
+		return status;
+	});
+	ipcMain.handle("ssh:remove", (_e, id: string) => {
+		ssh().service.disconnect(id);
+		remoteDesktops?.disconnect(id);
+		return ssh().store.remove(id);
+	});
+
+	ipcMain.handle("desktop:states", () => remoteDesktops?.states() ?? []);
+	// Opened from the panel, the user is the one who wants to drive it.
+	ipcMain.handle("desktop:connect", (_e, hostId: string) => desktops().connect(hostId, "user"));
+	ipcMain.handle("desktop:disconnect", (_e, hostId: string) => remoteDesktops?.disconnect(hostId));
+	ipcMain.handle("desktop:setController", (_e, hostId: string, controller: DesktopController) => {
+		if (controller !== "agent" && controller !== "user") throw new Error("Invalid controller");
+		return desktops().setController(hostId, controller);
+	});
+	ipcMain.handle("desktop:watch", (_e, hostId: string, watching: boolean) => remoteDesktops?.watch(hostId, !!watching));
+	// Fire-and-forget: pointer motion arrives dozens of times a second.
+	ipcMain.on("desktop:pointer", (_e, input: DesktopPointerInput) => {
+		try {
+			remoteDesktops?.userPointer(input);
+		} catch {
+			// Closed under the pointer; the state event already says so.
+		}
+	});
+	ipcMain.on("desktop:key", (_e, input: DesktopKeyInput) => {
+		try {
+			remoteDesktops?.userKey(input);
+		} catch {}
+	});
+	ipcMain.handle("ssh:test", (_e, id: string) => ssh().service.test(id));
+	ipcMain.handle("ssh:chooseKey", async (e): Promise<string | null> => {
+		const win = BrowserWindow.fromWebContents(e.sender);
+		if (!win) return null;
+		const sshDir = join(app.getPath("home"), ".ssh");
+		const result = await dialog.showOpenDialog(win, {
+			properties: ["openFile", "showHiddenFiles"],
+			title: "选择 SSH 私钥",
+			...(existsSync(sshDir) ? { defaultPath: sshDir } : {}),
+		});
+		return result.canceled ? null : result.filePaths[0];
+	});
+	ipcMain.handle("ssh:forgetHostKey", (_e, id: string) => {
+		ssh().service.disconnect(id);
+		return ssh().store.setFingerprint(id, null);
+	});
 
 	ipcMain.handle("pr:list", (_e, cwd: string, filter: PullRequestFilter) =>
 		pullRequests?.list(cwd, filter),
@@ -1397,6 +1728,8 @@ app.on("before-quit", () => {
 	modelPricing?.stop();
 	automationService?.stop();
 	terminalService?.killAll();
+	remoteDesktops?.disconnectAll();
+	sshState?.service.disconnectAll();
 	// Clone dev servers are child processes the agent started and may not have stopped.
 	devServers.stopAll();
 	// Stdio servers are child processes: not killing them leaks one per launch.

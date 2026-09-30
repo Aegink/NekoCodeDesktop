@@ -7,7 +7,9 @@ import {
 	MAX_PREIMAGE_BYTES,
 	packPreimage,
 	RECORDED_TOOLS,
+	takeReportedPreimages,
 	type FileMutationData,
+	type ReportedPreimage,
 } from "./file-journal";
 
 /**
@@ -45,6 +47,9 @@ export class FileJournalRecorder {
 	 */
 	private workspacePath(value: unknown): { absolute: string; relative: string } | null {
 		if (typeof value !== "string" || !value.trim() || value.includes("\0")) return null;
+		// `conflict://3` and the like name no file; the tool reports the files it
+		// really changed itself. A drive letter is one letter, so `C:/` is not one.
+		if (/(?:^|:)[a-z][a-z0-9+.-]+:\/\//i.test(value.trim())) return null;
 		const root = resolve(this.cwd);
 		const absolute = resolve(root, value);
 		const suffix = relative(root, absolute);
@@ -118,28 +123,47 @@ export class FileJournalRecorder {
 	 * in it — harmless, but it would also report a change that never happened.
 	 */
 	async afterTool(session: AgentSession, toolCallId: string, isError: boolean): Promise<void> {
+		// Reported files were written before being reported, so they changed even
+		// if the call went on to fail on a later file.
+		const committed = takeReportedPreimages(toolCallId).flatMap((file) => this.reportedRecord(file) ?? []);
 		const pending = this.pending.get(toolCallId);
-		if (!pending) return;
 		this.pending.delete(toolCallId);
-		if (isError) return;
-		const { record } = pending;
-		// Measured here, the one moment both versions are to hand. The checkpoint
-		// list is rebuilt on every streaming event, so a row that had to read files
-		// and diff them to draw itself would put the transcript's frame rate on the
-		// disk. A skipped pre-image has nothing to measure against.
-		if (!record.skipped) {
-			const counts = await this.countChange(record.path, pending.before ?? "");
-			if (counts) {
-				record.additions = counts.additions;
-				record.deletions = counts.deletions;
+		if (pending && !isError) committed.unshift(pending);
+		for (const { record, before } of committed) {
+			// Measured here, the one moment both versions are to hand. The checkpoint
+			// list is rebuilt on every streaming event, so a row that had to read files
+			// and diff them to draw itself would put the transcript's frame rate on the
+			// disk. A skipped pre-image has nothing to measure against.
+			if (!record.skipped) {
+				const counts = await this.countChange(record.path, before ?? "");
+				if (counts) {
+					record.additions = counts.additions;
+					record.deletions = counts.deletions;
+				}
+			}
+			try {
+				session.sessionManager.appendCustomEntry(FILE_MUTATION_ENTRY, record);
+			} catch {
+				// A transcript that will not take the record still ran the tool; losing
+				// the undo is better than failing the turn over it.
 			}
 		}
-		try {
-			session.sessionManager.appendCustomEntry(FILE_MUTATION_ENTRY, record);
-		} catch {
-			// A transcript that will not take the record still ran the tool; losing
-			// the undo is better than failing the turn over it.
+	}
+
+	/** The record for a file a multi-file tool reported, or null for one outside the workspace. */
+	private reportedRecord(file: ReportedPreimage): { record: FileMutationData; before: string | null } | null {
+		const target = this.workspacePath(file.path);
+		if (!target) return null;
+		const record: FileMutationData = { path: target.relative, before: null, beforeBytes: 0, tool: file.tool };
+		if (!file.before) return { record, before: null };
+		if (file.before.length > MAX_PREIMAGE_BYTES) {
+			record.skipped = "too-large";
+			record.beforeBytes = file.before.length;
+			return { record, before: null };
 		}
+		record.before = packPreimage(file.before);
+		record.beforeBytes = file.before.length;
+		return { record, before: file.before.toString("utf8") };
 	}
 
 	/** Forget pre-images for calls that never reported back (an aborted run). */

@@ -7,6 +7,7 @@ import { AboutSettings } from "./AboutSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import { ConnectSettings } from "./ConnectSettings";
 import { GitHubSettings } from "./GitHubSettings";
+import { SshSettings } from "./SshSettings";
 import { ProviderModelSettings } from "./ProviderModelSettings";
 import { PluginSettings } from "./PluginSettings";
 import { McpSettings } from "./McpSettings";
@@ -16,6 +17,7 @@ import { SkillSettings } from "./SkillSettings";
 import { WebUiSettings } from "./WebUiSettings";
 import { ContextSettings } from "./ContextSettings";
 import { HooksSettings } from "./HooksSettings";
+import { WebToolsSettings } from "./WebToolsSettings";
 import { api } from "../../api";
 import { ArrowLeftIcon } from "../../lib/icons";
 
@@ -31,11 +33,13 @@ const SECTIONS = [
 	{ id: "agents", labelKey: "settings.section.agents", group: "models" },
 	{ id: "tokens", labelKey: "settings.section.tokens", group: "models" },
 	{ id: "context", labelKey: "settings.section.context", group: "capabilities" },
+	{ id: "web", labelKey: "settings.section.web", group: "capabilities" },
 	{ id: "skills", labelKey: "settings.section.skills", group: "capabilities" },
 	{ id: "mcp", labelKey: "settings.section.mcp", group: "capabilities" },
 	{ id: "plugins", labelKey: "settings.section.plugins", group: "capabilities" },
 	{ id: "hooks", labelKey: "settings.section.hooks", group: "capabilities" },
 	{ id: "github", labelKey: "settings.section.github", group: "integrations" },
+	{ id: "ssh", labelKey: "settings.section.ssh", group: "integrations" },
 	{ id: "connect", labelKey: "settings.section.connect", group: "integrations" },
 	{ id: "webui", labelKey: "settings.section.webui", group: "integrations" },
 	{ id: "about", labelKey: "settings.section.about", group: "about" },
@@ -66,9 +70,12 @@ export function SettingsPage({
 }) {
 	const { t } = useTranslation();
 	const [section, setSection] = useState<SectionId>(initialSection ?? "general");
-	// External agents run local processes through the preload bridge.
+	// External agents run local processes through the preload bridge; SSH
+	// passwords are entered on the desktop, not over the network.
 	const sections =
-		api.runtime === "web" ? SECTIONS.filter((entry) => entry.id !== "webui" && entry.id !== "agents") : SECTIONS;
+		api.runtime === "web"
+			? SECTIONS.filter((entry) => entry.id !== "webui" && entry.id !== "agents" && entry.id !== "ssh")
+			: SECTIONS;
 
 	return (
 		<div className="flex min-h-0 flex-1">
@@ -120,10 +127,12 @@ export function SettingsPage({
 					{section === "tokens" ? <TokenUsageSettings /> : null}
 					{section === "context" ? <ContextSettings cwd={cwd} projects={projects} /> : null}
 					{section === "hooks" ? <HooksSettings projects={projects} /> : null}
+					{section === "web" ? <WebToolsSettings /> : null}
 					{section === "skills" ? <SkillSettings /> : null}
 					{section === "plugins" ? <PluginSettings /> : null}
 					{section === "mcp" ? <McpSettings /> : null}
 					{section === "github" ? <GitHubSettings /> : null}
+					{section === "ssh" && api.runtime !== "web" ? <SshSettings /> : null}
 					{section === "webui" && api.runtime !== "web" ? <WebUiSettings /> : null}
 					{section === "about" ? <AboutSettings /> : null}
 				</div>

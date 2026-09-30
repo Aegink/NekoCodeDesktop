@@ -3,6 +3,8 @@ import type { ExecutionMode } from "../shared/agent";
 import {
 	isAgentPhase,
 	isWorkMode,
+	type ExplorerRun,
+	MAX_FINISHED_EXPLORERS,
 	MAX_TASK_STEPS,
 	MAX_WORKERS,
 	type SavedWorkflowTask,
@@ -102,6 +104,7 @@ export function readSavedWorkflow(value: unknown): WorkflowSavedState | undefine
 export class WorkflowState {
 	private todos: WorkflowTodo[];
 	private tasks: WorkflowTask[];
+	private explorers: ExplorerRun[] = [];
 	private running = new Map<string, { controller: AbortController; scopes: string[] }>();
 	private pending: {
 		request: WorkflowRequest;
@@ -121,6 +124,7 @@ export class WorkflowState {
 			request: this.pending?.request ?? null,
 			todos: this.todos,
 			tasks: this.tasks,
+			...(this.explorers.length ? { explorers: this.explorers } : {}),
 		});
 	}
 	saved(): WorkflowSavedState {
@@ -324,7 +328,7 @@ export class WorkflowState {
 	 * than two that disagree. Late steps from a worker that already finished are
 	 * dropped — its card is its final report by then.
 	 */
-	private recordStep(task: WorkflowTask, step: TaskStep): void {
+	private recordStep(task: WorkflowTask | ExplorerRun, step: TaskStep): void {
 		if (this.closed || task.status !== "running") return;
 		const at = task.steps.findIndex((entry) => entry.id === step.id);
 		if (at >= 0) task.steps[at] = step;
@@ -336,6 +340,39 @@ export class WorkflowState {
 		this.options.onChange();
 	}
 	/**
+	 * Start tracking one `code_search` explorer, and return the handlers its
+	 * helper session reports through. Older finished runs make way; running
+	 * ones never do.
+	 */
+	startExplorer(
+		query: string,
+		model?: string,
+		toolCallId?: string,
+	): { step: (step: TaskStep) => void; finish: (status: ExplorerRun["status"]) => void } {
+		const run: ExplorerRun = {
+			id: randomUUID(),
+			query,
+			model,
+			...(toolCallId ? { toolCallId } : {}),
+			status: "running",
+			startedAt: Date.now(),
+			steps: [],
+		};
+		const finished = this.explorers.filter((entry) => entry.status !== "running").slice(-(MAX_FINISHED_EXPLORERS - 1));
+		this.explorers = [...this.explorers.filter((entry) => entry.status === "running"), ...finished, run];
+		this.options.onChange();
+		return {
+			step: (step) => this.recordStep(run, step),
+			finish: (status) => {
+				if (run.status !== "running") return;
+				this.closeSteps(run, status);
+				run.status = status;
+				run.endedAt = Date.now();
+				this.options.onChange();
+			},
+		};
+	}
+	/**
 	 * Settle every step the worker left open.
 	 *
 	 * A worker killed mid-step leaves it running, and a spinner that never stops
@@ -343,7 +380,7 @@ export class WorkflowState {
 	 * being cancelled out from under itself — come through here, because the
 	 * cancelled one is exactly the case that leaves steps dangling.
 	 */
-	private closeSteps(task: WorkflowTask, status: WorkflowTask["status"]): void {
+	private closeSteps(task: WorkflowTask | ExplorerRun, status: WorkflowTask["status"]): void {
 		const at = Date.now();
 		for (const step of task.steps) {
 			if (step.kind === "thinking") step.endedAt ??= at;

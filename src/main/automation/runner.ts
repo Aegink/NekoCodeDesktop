@@ -3,6 +3,9 @@ import type { Automation } from "../../shared/automation";
 import { pi } from "../pi";
 import { createPromptResources } from "../workflow-runtime";
 import { createStatTool } from "../file-tools";
+import { createWebTools, webToolsEnabled } from "../web-tools";
+import { createAstEditTool, createAstGrepTool } from "../ast-tools";
+import { createGithubTool } from "../github-tool";
 import { currentCommandShell } from "../command-shell";
 import { COMPACTION_INSTRUCTIONS, toolsForMode, type PromptContext } from "../prompt-library";
 import { hookService, memorySection } from "../context-services";
@@ -51,6 +54,7 @@ export class AutomationRunner {
 			mode: "agent",
 			permission: automation.mode,
 			headless: true,
+			webTools: webToolsEnabled(),
 			...(shell.id === "auto" ? {} : { shellTools: shell.shellTools, shellNote: shell.promptNote }),
 			// Read, not written: an unattended run follows what the user has asked
 			// to be remembered, but has no one to confirm anything new with.
@@ -63,7 +67,14 @@ export class AutomationRunner {
 		const { session } = await createAgentSession({
 			resourceLoader,
 			tools: toolsForMode(context()),
-			customTools: [createStatTool(automation.cwd), ...shell.customTools(automation.cwd, createBashToolDefinition)],
+			customTools: [
+				createStatTool(automation.cwd),
+				...createWebTools(),
+				createAstGrepTool(automation.cwd),
+				createAstEditTool(automation.cwd),
+				createGithubTool(automation.cwd),
+				...shell.customTools(automation.cwd, createBashToolDefinition),
+			],
 			toolOptions: shell.toolOptions,
 			compactionInstructions: COMPACTION_INSTRUCTIONS,
 			cwd: automation.cwd,

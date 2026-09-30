@@ -11,7 +11,8 @@
 
 export const INSTRUCTION_FILE_NAMES = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"] as const;
 
-export type InstructionScope = "global" | "project" | "ancestor";
+/** `imported`: a rule file another tool keeps (Cursor, Windsurf, Copilot…), read as it is. */
+export type InstructionScope = "global" | "project" | "ancestor" | "imported";
 
 export interface InstructionFile {
 	path: string;

@@ -1,6 +1,5 @@
 import type { ComposerInsertion } from "../../../shared/browser";
 import type { MentionCandidate } from "../../../shared/mentions";
-import type { FastContextConfig } from "../../../shared/fast-context";
 import type { FusionConfig } from "../../../shared/fusion";
 import type { WorkMode, WorkflowAnswer } from "../../../shared/workflow";
 import type { SlashCommandSummary } from "../../../shared/commands";
@@ -111,7 +110,6 @@ interface ChatViewProps {
 	onSendBackground?: (text: string) => void;
 	onAbort: () => void;
 	onSetFusion: (config: FusionConfig) => void;
-	onSetFastContext: (config: FastContextConfig) => void;
 	onSetModel: (modelKey: string) => void;
 	onSetThinking: (level: ThinkingLevel) => void;
 	onSetMode: (mode: ExecutionMode) => void;
@@ -128,8 +126,23 @@ interface ChatViewProps {
 	onStartSession: (request: SendPromptRequest) => void;
 	/** Ask to rewind to a checkpoint; the confirmation is App's to show. */
 	onRestoreCheckpoint?: (checkpoint: CheckpointSummary) => void;
+	/** Branch the conversation at a reply into a new session; absent where that is not offered. */
+	onForkMessage?: (cellId: string) => Promise<void> | void;
 	/** Show the list of every restore point in the right dock. */
 	onOpenCheckpoints: () => void;
+	/**
+	 * Drop the header's checkpoints/review/browser/terminal buttons. The IDE
+	 * layout docks this view beside its own panels, where those Agent-layout
+	 * panels are not on screen to open.
+	 */
+	hideDockActions?: boolean;
+	/**
+	 * A narrow pane of the split chat area: the header's buttons drop their
+	 * labels and the project chip gives way to the title.
+	 */
+	compactHeader?: boolean;
+	/** At the header's end: a split pane's move, maximize and close controls. */
+	headerActions?: React.ReactNode;
 	/** This task's isolated checkout was merged or thrown away. */
 	onWorktreeReleased?: () => void;
 	onWorktreeError?: (message: string) => void;
@@ -344,7 +357,6 @@ export function ChatView(props: ChatViewProps) {
 				onSetMode={props.onSetMode}
 				onSetWorkMode={props.onSetWorkMode}
 				onSetFusion={props.onSetFusion}
-				onSetFastContext={props.onSetFastContext}
 				onSetModel={props.onSetModel}
 				onSetThinking={props.onSetThinking}
 				onStart={props.onStartSession}
@@ -358,50 +370,59 @@ export function ChatView(props: ChatViewProps) {
 	// or an older desktop feeding the WebUI — sends a goal without the fields
 	// this banner reads, and one missing field must not take the window down.
 	const goal = readGoalState(snapshot.goal);
+	const compact = props.compactHeader === true;
+	const actionLabel = (label: string) => (compact ? { title: label, "aria-label": label } : {});
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b border-[color:var(--app-surface-divider)] px-3">
 				<div className="flex min-w-0 flex-1 items-center gap-2">
-					<div className="min-w-0 max-w-[50%]">
-						<ProjectPicker cwd={snapshot.session.cwd} disabled={busy} onPickProject={props.onPickProject} />
-					</div>
+					{compact ? null : (
+						<div className="min-w-0 max-w-[50%]">
+							<ProjectPicker cwd={snapshot.session.cwd} disabled={busy} onPickProject={props.onPickProject} />
+						</div>
+					)}
 					<span className="min-w-0 truncate text-[length:var(--app-font-size-ui,12px)] font-medium">
 						{snapshot.session.titlePending
 							? t("sessions.pendingTitle")
 							: snapshot.session.title}
 					</span>
-					<span className="shrink-0 text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground/60">
-						{t("chat.cells", { count: snapshot.cells.length + (snapshot.earlierCells ?? 0) })}
-					</span>
+					{compact ? null : (
+						<span className="shrink-0 text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground/60">
+							{t("chat.cells", { count: snapshot.cells.length + (snapshot.earlierCells ?? 0) })}
+						</span>
+					)}
 				</div>
-				{!props.mobile && <><Button onClick={props.onOpenCheckpoints} size="xs" variant="chrome-outline">
+				{!props.mobile && !props.hideDockActions && <><Button onClick={props.onOpenCheckpoints} size={compact ? "icon-xs" : "xs"} variant="chrome-outline" {...actionLabel(t("checkpoint.panelTitle"))}>
 					<HistoryIcon className="size-3.5" />
-					{t("checkpoint.panelTitle")}
+					{compact ? null : t("checkpoint.panelTitle")}
 				</Button>
-				<Button onClick={props.onOpenReview} size="xs" variant="chrome-outline">
+				<Button onClick={props.onOpenReview} size={compact ? "icon-xs" : "xs"} variant="chrome-outline" {...actionLabel(t("nav.review"))}>
 					<GitBranchIcon className="size-3.5" />
-					{t("nav.review")}
+					{compact ? null : t("nav.review")}
 				</Button>
 				{props.browserAvailable !== false ? (
 					<Button
 						onClick={props.onToggleBrowser}
-						size="xs"
+						size={compact ? "icon-xs" : "xs"}
 						variant={props.browserOpen ? "subtle" : "chrome-outline"}
+						{...actionLabel(t("nav.browser"))}
 					>
 						<GlobeIcon className="size-3.5" />
-						{t("nav.browser")}
+						{compact ? null : t("nav.browser")}
 					</Button>
 				) : null}
 				<Button
 					onClick={props.onToggleTerminal}
-					size="xs"
+					size={compact ? "icon-xs" : "xs"}
 					variant={terminalOpen ? "subtle" : "chrome-outline"}
+					{...actionLabel(t("chat.terminal"))}
 				>
 					<TerminalIcon className="size-3.5" />
-					{t("chat.terminal")}
+					{compact ? null : t("chat.terminal")}
 				</Button>
 				</>}
+				{props.headerActions}
 			</header>
 
 			{/* Desktop only: the phone client reaches tasks over the LAN API, which
@@ -454,12 +475,14 @@ export function ChatView(props: ChatViewProps) {
 							cells={snapshot.cells}
 							streaming={snapshot.streaming}
 							tasks={snapshot.workflow.tasks}
+							explorers={snapshot.workflow.explorers}
 							onOpenTask={props.onOpenTask}
 							onOpenFile={props.onOpenFile}
 							checkpoints={snapshot.checkpoints}
 							onRestoreCheckpoint={props.onRestoreCheckpoint}
 							onOpenReview={props.onOpenReview}
 							onLoadToolOutput={props.onLoadToolOutput}
+							onForkMessage={props.onForkMessage}
 						/>
 							</>
 						)}
@@ -498,7 +521,6 @@ export function ChatView(props: ChatViewProps) {
 				models={snapshot.models}
 				context={snapshot.context}
 				modelKey={snapshot.modelKey}
-				fastContext={snapshot.fastContext}
 				fusion={snapshot.fusion}
 				thinkingLevel={snapshot.thinkingLevel}
 				thinkingLevels={snapshot.thinkingLevels}
@@ -510,7 +532,6 @@ export function ChatView(props: ChatViewProps) {
 				allowImageAttachments={props.mobile !== true}
 				onAbort={props.onAbort}
 				onSetFusion={props.onSetFusion}
-				onSetFastContext={props.onSetFastContext}
 				onSetModel={props.onSetModel}
 				onSetThinking={props.onSetThinking}
 				onSetMode={props.onSetMode}

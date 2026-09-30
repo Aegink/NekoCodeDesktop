@@ -1,9 +1,6 @@
-import { useId, useState } from "react";
 import type { TurnUsage } from "../../../../shared/agent";
 import { formatCost, formatDuration, formatPercent, formatRate, formatTokens, usageStats } from "../../../../shared/usage";
 import { useTranslation } from "../../i18n";
-import { GaugeIcon } from "../../lib/icons";
-import { MUTED_LABEL_TEXT_CLASS_NAME } from "../../surfaceStyles";
 import { cn } from "../../lib/utils";
 
 function ModelUsageGrid({ usage, provider, model, role }: {
@@ -91,24 +88,6 @@ export function UsageDetails({ usage }: { usage: TurnUsage }) {
 					) : null}
 				</>
 			) : <ModelUsageGrid usage={usage} provider={usage.provider} model={usage.model} />}
-		</div>
-	);
-}
-
-/** Keep reference metrics behind the existing usage button at the end of a turn. */
-export function UsagePanel({ usage }: { usage: TurnUsage }) {
-	const { t } = useTranslation();
-	const [open, setOpen] = useState(false);
-	const id = useId();
-	return (
-		<div className="flex min-w-0 flex-col gap-2">
-			<button type="button" aria-expanded={open} aria-controls={open ? id : undefined}
-				aria-label={t("usage.title")} title={t("usage.title")}
-				onClick={() => setOpen((value) => !value)}
-				className={cn("inline-flex w-fit items-center rounded p-0.5 hover:text-foreground", MUTED_LABEL_TEXT_CLASS_NAME)}>
-				<GaugeIcon className="size-3.5" />
-			</button>
-			{open ? <div id={id}><UsageDetails usage={usage} /></div> : null}
 		</div>
 	);
 }

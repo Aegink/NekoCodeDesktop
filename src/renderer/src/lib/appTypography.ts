@@ -12,6 +12,8 @@ export interface AppTypographyScale {
 	uiMetaPx: number;
 	uiTimestampPx: number;
 	chatPx: number;
+	/** Reply and prompt prose: a step above the chrome around it (tool rows, headers) so it reads as the content. */
+	chatBodyPx: number;
 	chatCodePx: number;
 	chatMetaPx: number;
 	chatTinyPx: number;
@@ -45,6 +47,7 @@ export function getAppTypographyScale(
 		uiMetaPx: clampTypographyPx(basePx * 0.84, 10),
 		uiTimestampPx: clampTypographyPx(basePx * 0.72, 8),
 		chatPx: basePx,
+		chatBodyPx: clampTypographyPx(basePx * 1.08, basePx),
 		chatCodePx: clampTypographyPx(basePx * 0.95, 10),
 		chatMetaPx: clampTypographyPx(basePx * 0.84, 10),
 		chatTinyPx: clampTypographyPx(basePx * 0.66, 8),

@@ -59,3 +59,55 @@ describe("browser_screenshot policy", () => {
 		expect(prompt).not.toContain("browser_screenshot 既保存 PNG");
 	});
 });
+
+describe("web tool availability", () => {
+	test("every mode and agent phase offers them when switched on, read-only ones included", () => {
+		for (const mode of WORK_MODES) {
+			const tools = toolsForMode({ ...base, mode, permission: "read-only", webTools: true });
+			expect(tools, mode).toContain("web_search");
+			expect(tools, mode).toContain("web_fetch");
+		}
+		for (const phase of AGENT_PHASES) {
+			expect(toolsForMode({ ...base, mode: "agent", phase, webTools: true }), phase).toContain("web_fetch");
+		}
+	});
+
+	test("they are gone when switched off, or when nobody said", () => {
+		expect(toolsForMode({ ...base, mode: "agent", webTools: false })).not.toContain("web_search");
+		expect(toolsForMode({ ...base, mode: "agent" })).not.toContain("web_fetch");
+	});
+
+	test("the prompt warns that web content is data, only when they are present", () => {
+		expect(buildModePrompt({ ...base, mode: "agent", webTools: true })).toContain("web_search / web_fetch 访问公网");
+		expect(buildModePrompt({ ...base, mode: "agent" })).not.toContain("web_search / web_fetch 访问公网");
+	});
+});
+
+describe("structural and GitHub tool guidance", () => {
+	const guidance = {
+		ast_grep: "ast_grep 按语法结构找代码",
+		ast_edit: "ast_edit 是跨文件的结构化改写",
+		github: "github 工具直接读取 GitHub",
+	};
+
+	test("a phase that can write gets all three", () => {
+		const prompt = buildModePrompt({ ...base, mode: "agent", phase: "execute" });
+		for (const line of Object.values(guidance)) expect(prompt).toContain(line);
+	});
+
+	test("a read-only mode gets search and GitHub guidance but no rewrite guidance", () => {
+		const prompt = buildModePrompt({ ...base, mode: "ask" });
+		expect(prompt).toContain(guidance.ast_grep);
+		expect(prompt).toContain(guidance.github);
+		expect(prompt).not.toContain(guidance.ast_edit);
+	});
+
+	test("a tool the session cannot call is never described", () => {
+		// Fast Context explorers are limited to local read tools.
+		const prompt = buildModePrompt({ ...base, mode: "subagent", child: true, fastContext: true, permission: "read-only" });
+		const tools = toolsForMode({ ...base, mode: "subagent", child: true, fastContext: true, permission: "read-only" });
+		for (const [name, line] of Object.entries(guidance)) expect(prompt.includes(line)).toBe(tools.includes(name));
+		expect(tools).not.toContain("github");
+		expect(prompt).toContain(guidance.ast_grep);
+	});
+});

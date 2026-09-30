@@ -1,7 +1,8 @@
 import { existsSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { BrowserWindow } from "electron";
-import { spawn, type IPty } from "node-pty";
+import { spawn } from "node-pty";
+import type { SshService } from "./ssh-service";
 import type {
 	TerminalCreateRequest,
 	TerminalInputRequest,
@@ -15,17 +16,37 @@ function clamp(value: number, min: number, max: number): number {
 	return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
+/** A local pty or a remote shell channel, as the panel drives either. */
+interface TerminalProcess {
+	write(data: string): void;
+	resize(cols: number, rows: number): void;
+	kill(): void;
+}
+
 export class TerminalService {
-	private ptys = new Map<string, IPty>();
+	private ptys = new Map<string, TerminalProcess>();
 
-	constructor(private readonly win: BrowserWindow) {}
+	constructor(
+		private readonly win: BrowserWindow,
+		private readonly ssh?: () => SshService,
+	) {}
 
-	create(req: TerminalCreateRequest): TerminalSession {
+	private output(id: string, data: string): void {
+		if (!this.win.isDestroyed()) this.win.webContents.send("terminal:data", { id, data });
+	}
+
+	private exited(id: string, exitCode: number, signal?: number): void {
+		if (!this.ptys.delete(id)) return;
+		if (!this.win.isDestroyed()) this.win.webContents.send("terminal:exit", { id, exitCode, signal });
+	}
+
+	async create(req: TerminalCreateRequest): Promise<TerminalSession> {
+		const cols = clamp(req.cols, 2, 500);
+		const rows = clamp(req.rows, 1, 300);
+		if (req.sshHostId) return this.createRemote(req.sshHostId, cols, rows);
 		if (!existsSync(req.cwd) || !statSync(req.cwd).isDirectory()) {
 			throw new Error(`Terminal cwd does not exist: ${req.cwd}`);
 		}
-		const cols = clamp(req.cols, 2, 500);
-		const rows = clamp(req.rows, 1, 300);
 		const shell =
 			process.env.SHELL ||
 			(process.platform === "win32" ? "powershell.exe" : "/bin/bash");
@@ -43,17 +64,28 @@ export class TerminalService {
 			},
 		});
 		this.ptys.set(id, pty);
-		pty.onData((data) => {
-			if (!this.win.isDestroyed()) {
-				this.win.webContents.send("terminal:data", { id, data });
-			}
+		pty.onData((data) => this.output(id, data));
+		pty.onExit(({ exitCode, signal }) => this.exited(id, exitCode, signal));
+		return { id };
+	}
+
+	private async createRemote(hostId: string, cols: number, rows: number): Promise<TerminalSession> {
+		const ssh = this.ssh?.();
+		if (!ssh) throw new Error("SSH is unavailable");
+		const { channel, close } = await ssh.shell(hostId, { cols, rows });
+		const id = randomUUID();
+		// Bytes, not strings: a multibyte character can straddle two packets.
+		const decoder = new TextDecoder();
+		this.ptys.set(id, {
+			write: (data) => channel.write(data),
+			resize: (nextCols, nextRows) => channel.setWindow(nextRows, nextCols, 0, 0),
+			kill: close,
 		});
-		pty.onExit(({ exitCode, signal }) => {
-			this.ptys.delete(id);
-			if (!this.win.isDestroyed()) {
-				this.win.webContents.send("terminal:exit", { id, exitCode, signal });
-			}
-		});
+		const onData = (chunk: Buffer) => this.output(id, decoder.decode(chunk, { stream: true }));
+		channel.on("data", onData);
+		channel.stderr.on("data", onData);
+		channel.on("exit", (code: number | null) => this.exited(id, typeof code === "number" ? code : 0));
+		channel.on("close", () => this.exited(id, 0));
 		return { id };
 	}
 

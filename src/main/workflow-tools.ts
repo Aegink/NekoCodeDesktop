@@ -8,13 +8,14 @@ export interface WorkflowToolHost {
 	requestMode(mode: WorkMode, reason: string, signal?: AbortSignal): Promise<unknown>;
 	debugLog(action: "status" | "read" | "clear"): Promise<unknown>;
 	commitMessage(instructions: string, signal?: AbortSignal): Promise<string>;
-	searchCode(query: string, signal?: AbortSignal): Promise<string>;
+	/** `toolCallId` ties the live explorer run to the transcript row that started it. */
+	searchCode(query: string, signal?: AbortSignal, toolCallId?: string): Promise<string>;
 }
 function define<T extends TSchema>(
 	name: string,
 	description: string,
 	parameters: T,
-	action: (args: Static<T>, signal?: AbortSignal) => Promise<unknown>,
+	action: (args: Static<T>, signal?: AbortSignal, toolCallId?: string) => Promise<unknown>,
 ): ToolDefinition {
 	return {
 		name,
@@ -23,9 +24,9 @@ function define<T extends TSchema>(
 		promptSnippet: description,
 		parameters,
 		executionMode: "sequential",
-		async execute(_id, params, signal) {
+		async execute(id, params, signal) {
 			if (signal?.aborted) throw new Error("Tool call cancelled");
-			const data = await action(params as Static<T>, signal);
+			const data = await action(params as Static<T>, signal, id);
 			return {
 				content: [{ type: "text", text: typeof data === "string" ? data : JSON.stringify(data) }],
 				details: data,
@@ -132,7 +133,7 @@ export function createWorkflowTools(host: WorkflowToolHost): ToolDefinition[] {
 			"code_search",
 			"Fast Context: launch a fresh isolated read-only explorer subagent over the repository and get back a compact Markdown report of `path:start-end` findings with evidence. Prefer it before broad manual exploration for complex or cross-module questions and unknown code locations; skip it for known files, exact symbols, or small tasks, and verify its candidates with ordinary read/grep before editing.",
 			object({ query: text(30000) }),
-			(args, signal) => host.searchCode(args.query, signal),
+			(args, signal, id) => host.searchCode(args.query, signal, id),
 		),
 		define(
 			"commit_message",

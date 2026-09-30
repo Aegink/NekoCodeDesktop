@@ -1,7 +1,6 @@
 import type { GoalState } from "./goal";
 import type { AgentPhase, WorkMode, WorkflowSnapshot } from "./workflow";
 import type { CheckpointSummary } from "./checkpoints";
-import type { FastContextConfig } from "./fast-context";
 import type { FusionConfig } from "./fusion";
 
 export type ExecutionMode = "read-only" | "auto" | "full-access";
@@ -175,7 +174,6 @@ export interface SessionSummary {
  * session starts with. Mirrors the pickers' half of AgentSnapshot.
  */
 export interface AgentDefaults {
-	fastContext: FastContextConfig;
 	fusion?: FusionConfig | null;
 	modelKey: string | null;
 	models: ModelOption[];
@@ -198,7 +196,6 @@ export interface ContextUsage {
 }
 
 export interface AgentSnapshot {
-	fastContext: FastContextConfig;
 	fusion?: FusionConfig | null;
 	session: SessionSummary;
 	cells: AgentCell[];
@@ -246,6 +243,14 @@ export interface AgentSnapshot {
 export interface OpenSessionRequest {
 	cwd: string;
 	sessionFile: string;
+}
+
+/** Branch the open conversation at one of the model's replies. */
+export interface ForkSessionRequest {
+	/** The transcript cell of the reply the branch keeps, and ends on. */
+	cellId: string;
+	/** What to call the branch; absent keeps the original's name. */
+	title?: string;
 }
 
 export interface RenameSessionRequest {

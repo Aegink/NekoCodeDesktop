@@ -4,9 +4,13 @@
   "tools": [
     "read",
     "grep",
+    "ast_grep",
     "find",
     "ls",
     "stat",
+    "web_search",
+    "web_fetch",
+    "github",
     "code_search",
     "question",
     "todo_write",

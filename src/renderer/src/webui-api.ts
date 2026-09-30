@@ -11,6 +11,7 @@ const SUBSCRIPTIONS = {
 	onBrowserRevealAutomation: "browser:revealAutomation",
 	onSessionsChanged: "agent:sessionsChanged",
 	onRevealSession: "agent:revealSession",
+	onAgentTasks: "agent:tasks",
 	onMcpChanged: "mcp:changed",
 	onQqBotChanged: "qqbot:changed",
 	onAgentDefaults: "agent:defaults",
@@ -95,6 +96,12 @@ export function createWebUiApi(runtime: WebUiRuntime): AgentApi {
 		qqBotChooseProject: unsupported("WebUI 请使用宿主目录选择器"),
 		webUiStatus: unsupported("请在桌面应用中配置 WebUI"),
 		webUiSave: unsupported("请在桌面应用中配置 WebUI"),
+		// SSH passwords are configured on the desktop; remote shells stay there too.
+		sshStatus: () => Promise.resolve({ hosts: [], canStoreSecrets: false }),
+		desktopStates: () => Promise.resolve([]),
+		onDesktopState: () => () => {},
+		onDesktopFrame: () => () => {},
+		onDesktopAction: () => () => {},
 	};
 	for (const [method, channel] of Object.entries(SUBSCRIPTIONS)) {
 		base[method] = (listener: (payload: never) => void) => subscribe(channel, listener);

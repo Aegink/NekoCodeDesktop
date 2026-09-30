@@ -39,6 +39,8 @@ export interface SessionListProps {
 	caption?: string;
 	/** Rows that open but have no rename or delete. */
 	readOnly?: boolean;
+	/** Rows can be dragged into the chat area's split view. */
+	draggable?: boolean;
 }
 
 /**
@@ -182,6 +184,7 @@ export function SessionList(props: SessionListProps) {
 								<SessionRow
 									compact
 									hideActions={props.readOnly}
+									draggable={props.draggable}
 									disabled={props.busy}
 									active={session.id === activeId}
 									confirmingDelete={confirmingDelete === session.sessionFile}

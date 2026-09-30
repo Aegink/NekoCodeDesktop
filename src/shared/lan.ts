@@ -8,7 +8,6 @@ export interface LanStatus {
 	projects: LanProject[];
 }
 import type { AgentDefaults, ExecutionMode, SessionSummary, ThinkingLevel } from "./agent";
-import type { FastContextConfig } from "./fast-context";
 import type { FusionConfig } from "./fusion";
 import type { WorkMode } from "./workflow";
 
@@ -18,7 +17,6 @@ export interface LanTaskOptions {
 	mode?: ExecutionMode;
 	workMode?: WorkMode;
 	fusion?: FusionConfig;
-	fastContext?: FastContextConfig;
 }
 export interface LanState {
 	tasks: Array<Omit<SessionSummary, "sessionFile">>;

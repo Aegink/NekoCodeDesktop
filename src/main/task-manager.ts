@@ -10,6 +10,7 @@ import type {
 	SessionSummary,
 	StartBackgroundTaskResult,
 } from "../shared/agent";
+import { sortTaskBoard, taskBoardEntry, type TaskBoardEntry, type TaskRunTimes } from "../shared/task-board";
 
 export type AgentFactory = (emit: (channel: string, payload?: unknown) => void, owner?: AgentService) => AgentService;
 
@@ -25,28 +26,50 @@ export type SettledListener = (session: SessionSummary, selected: boolean) => vo
  */
 export type SnapshotListener = (snapshot: AgentSnapshot) => void;
 
+/** Where a task has its own checkout; see {@link TaskManager.board}. */
+export type WorktreeLookup = (sessionId: string) => { branch: string; base: string } | null;
+
 /** Owns execution lifetimes independently of the desktop's selected transcript. */
 export class TaskManager {
 	readonly owner: AgentService;
 	active: AgentService;
 	private agents = new Set<AgentService>();
 	private snapshots = new Map<AgentService, AgentSnapshot>();
+	/**
+	 * Sessions that have run since the app started — what the task board lists.
+	 * Opening an old session to read it is not running it, so it stays off the
+	 * board until it is prompted.
+	 */
+	private runs = new Map<AgentService, TaskRunTimes>();
 	private opening = new Map<string, Promise<AgentService>>();
 	private closed = false;
 	private transition: Promise<unknown> = Promise.resolve();
 	private listCache: { at: number; rows: SessionSummary[] } | undefined;
 	/**
-	 * Where the transcript window the desktop holds begins: the first cell it was
-	 * sent. Pinned rather than recomputed from the tail, so a run adding cells at
+	 * Where each transcript window the desktop holds begins, by session: the
+	 * first cell it was sent. Pinned rather than recomputed from the tail, so a run adding cells at
 	 * the bottom never pulls rows out from under the top of the viewport.
 	 */
-	private viewFrom: { sessionId: string; cellId: string } | null = null;
+	private viewFrom = new Map<string, string>();
+	/**
+	 * Sessions the window shows side by side besides the selected one. Each
+	 * keeps streaming into its own pane, so their snapshots are sent on too —
+	 * as `agent:paneSnapshot`, which never moves the selection.
+	 */
+	private watched = new Set<AgentService>();
+	/** Only the latest {@link watch} sets the panes; an earlier one still opening must not undo it. */
+	private watchSeq = 0;
 
 	constructor(
 		private factory: AgentFactory,
 		private emit: (channel: string, payload?: unknown) => void,
 		private onSettled?: SettledListener,
 		private onSnapshot?: SnapshotListener,
+		/**
+		 * The board changed. Called on every snapshot of a task on it — a stream
+		 * of them while anything runs — so the listener is expected to coalesce.
+		 */
+		private onBoardChanged?: () => void,
 	) {
 		this.owner = this.make();
 		this.active = this.owner;
@@ -77,11 +100,17 @@ export class TaskManager {
 				if (previous?.streaming && next && !next.streaming) {
 					this.onSettled?.(next.session, this.active === agent);
 				}
+				if (next?.streaming && !previous?.streaming) this.runs.set(agent, { startedAt: Date.now(), endedAt: null });
+				const run = this.runs.get(agent);
+				if (run && previous?.streaming && next && !next.streaming) run.endedAt = Date.now();
+				if (run) this.onBoardChanged?.();
 				if (next) this.onSnapshot?.(next);
 			}
 			if (channel === "agent:sessionsChanged") this.changed();
 			else if (this.active === agent)
 				this.emit(channel, channel === "agent:snapshot" ? this.view(payload as AgentSnapshot | null) : payload);
+			else if (channel === "agent:snapshot" && payload && this.watched.has(agent))
+				this.emit("agent:paneSnapshot", this.view(payload as AgentSnapshot));
 		}, this.owner);
 		this.agents.add(agent);
 		return agent;
@@ -95,11 +124,18 @@ export class TaskManager {
 	private select(agent: AgentService): AgentSnapshot {
 		const snapshot = agent.getSnapshot();
 		if (!snapshot) throw new Error("Session is unavailable");
+		const previous = this.active;
 		this.active = agent;
 		this.snapshots.set(agent, snapshot);
 		// A session is always opened at its end; how far back it was read last
-		// time belongs to that visit.
-		this.viewFrom = null;
+		// time belongs to that visit. A pane on screen is still that visit.
+		if (!this.watched.has(agent)) this.viewFrom.delete(snapshot.session.id);
+		// The pane that just lost focus only heard `agent:snapshot` while it had
+		// it; bring its own copy up to date before the new selection arrives.
+		if (previous !== agent && this.watched.has(previous)) {
+			const left = previous.getSnapshot();
+			if (left) this.emit("agent:paneSnapshot", this.view(left));
+		}
 		this.emit("agent:snapshot", this.view(snapshot));
 		return snapshot;
 	}
@@ -117,10 +153,10 @@ export class TaskManager {
 	view(snapshot: AgentSnapshot | null, back = 0): AgentSnapshot | null {
 		if (!snapshot) return null;
 		const sessionId = snapshot.session.id;
-		const from = this.viewFrom?.sessionId === sessionId ? this.viewFrom.cellId : undefined;
-		const view = remoteView(snapshot, { from, back }, DESKTOP_LIMITS);
+		const view = remoteView(snapshot, { from: this.viewFrom.get(sessionId), back }, DESKTOP_LIMITS);
 		const first = view.snapshot.cells[0];
-		this.viewFrom = first ? { sessionId, cellId: first.id } : null;
+		if (first) this.viewFrom.set(sessionId, first.id);
+		else this.viewFrom.delete(sessionId);
 		return view.earlier > 0 ? { ...view.snapshot, earlierCells: view.earlier } : view.snapshot;
 	}
 
@@ -230,6 +266,70 @@ export class TaskManager {
 		return select ? this.inOrder(open) : open();
 	}
 
+	/**
+	 * Set the sessions shown in the window's panes, opening any not yet live.
+	 * Replaces the previous set; an empty list ends the split view. Answers with
+	 * each pane's window — a session that could not be opened is left out
+	 * rather than failing the rest.
+	 */
+	async watch(requests: readonly OpenSessionRequest[]): Promise<AgentSnapshot[]> {
+		const seq = ++this.watchSeq;
+		const agents = await Promise.all(requests.map((req) => this.open(req, false).catch(() => null)));
+		if (seq !== this.watchSeq) return [];
+		const next = new Set(agents.filter((agent): agent is AgentService => agent !== null && this.agents.has(agent)));
+		for (const agent of this.watched) {
+			const id = this.snapshots.get(agent)?.session.id;
+			if (!next.has(agent) && agent !== this.active && id) this.viewFrom.delete(id);
+		}
+		this.watched = next;
+		return [...next].flatMap((agent) => {
+			const snapshot = this.viewOf(agent);
+			return snapshot ? [snapshot] : [];
+		});
+	}
+
+	/**
+	 * Every task on the board, the ones needing attention first.
+	 *
+	 * Built on request from the snapshots already held, so a board nobody is
+	 * looking at costs nothing.
+	 */
+	board(worktreeOf?: WorktreeLookup): TaskBoardEntry[] {
+		const entries: TaskBoardEntry[] = [];
+		for (const [agent, run] of this.runs) {
+			const snapshot = this.snapshots.get(agent);
+			if (!snapshot) continue;
+			entries.push(taskBoardEntry(snapshot, {
+				run,
+				worktree: worktreeOf?.(snapshot.session.id) ?? null,
+				selected: agent === this.active,
+			}));
+		}
+		return sortTaskBoard(entries);
+	}
+
+	/** Take finished tasks off the board. The sessions themselves stay, in the sidebar. */
+	dismiss(sessionIds: readonly string[]): void {
+		const ids = new Set(sessionIds);
+		let changed = false;
+		for (const agent of [...this.runs.keys()]) {
+			const snapshot = this.snapshots.get(agent);
+			if (!snapshot || !ids.has(snapshot.session.id) || snapshot.streaming || snapshot.workflow.request) continue;
+			this.runs.delete(agent);
+			changed = true;
+		}
+		if (changed) this.onBoardChanged?.();
+	}
+
+	/**
+	 * Stop one task, whichever is on screen. Only a session that is live here can
+	 * be running, so one that is not is already stopped.
+	 */
+	async abortSession(sessionId: string): Promise<void> {
+		const agent = [...this.snapshots].find(([, snapshot]) => snapshot.session.id === sessionId)?.[0];
+		await agent?.abort();
+	}
+
 	async list(cwd?: string): Promise<SessionSummary[]> {
 		if (!this.listCache || Date.now() - this.listCache.at > 5000) {
 			const at = Date.now();
@@ -285,16 +385,23 @@ export class TaskManager {
 	}
 
 	private drop(agent: AgentService): void {
+		const id = this.snapshots.get(agent)?.session.id;
+		if (id) this.viewFrom.delete(id);
 		this.agents.delete(agent);
 		this.snapshots.delete(agent);
+		this.watched.delete(agent);
+		if (this.runs.delete(agent)) this.onBoardChanged?.();
 		agent.close();
 	}
 
 	private prune(): void {
 		if (this.agents.size < 32) return;
-		for (const agent of this.agents) {
+		// Sessions only opened to be read go before finished ones still on the
+		// task board, which someone may yet come back to.
+		const candidates = [...this.agents].sort((a, b) => Number(this.runs.has(a)) - Number(this.runs.has(b)));
+		for (const agent of candidates) {
 			const snapshot = this.snapshots.get(agent);
-			if (agent !== this.active && agent !== this.owner && snapshot && !snapshot.streaming && !snapshot.workflow.request && existsSync(snapshot.session.sessionFile)) {
+			if (agent !== this.active && agent !== this.owner && !this.watched.has(agent) && snapshot && !snapshot.streaming && !snapshot.workflow.request && existsSync(snapshot.session.sessionFile)) {
 				this.drop(agent);
 				if (this.agents.size < 32) return;
 			}
@@ -307,5 +414,8 @@ export class TaskManager {
 		for (const agent of this.agents) agent.close();
 		this.agents.clear();
 		this.snapshots.clear();
+		this.runs.clear();
+		this.watched.clear();
+		this.viewFrom.clear();
 	}
 }
