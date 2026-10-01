@@ -1,4 +1,5 @@
 import type { FusionConfig } from "../shared/fusion";
+import type { CodeIntelModels, CodeIntelStatus, CodeIntelUpdate, CompletionRequest, CompletionResponse, IndexStatus } from "../shared/code-intel";
 import type { LanStatus } from "../shared/lan";
 import type { SshHostInput, SshStatus, SshTestResult } from "../shared/ssh";
 import type {
@@ -144,6 +145,7 @@ import type {
 	SaveModelProfileRequest,
 } from "../shared/settings";
 import type { WebToolsStatus, WebToolsUpdate } from "../shared/web-tools";
+import type { PromptsSnapshot, SavePromptRequest } from "../shared/prompts";
 
 function subscribe<T>(
 	channel: string,
@@ -441,6 +443,18 @@ const api = {
 	proxySave: (manual: string | null): Promise<ProxyStatus> => ipcRenderer.invoke("settings:saveProxy", manual),
 	webToolsStatus: (): Promise<WebToolsStatus> => ipcRenderer.invoke("settings:webToolsStatus"),
 	webToolsSave: (patch: WebToolsUpdate): Promise<WebToolsStatus> => ipcRenderer.invoke("settings:saveWebTools", patch),
+	codeIntelStatus: (): Promise<CodeIntelStatus> => ipcRenderer.invoke("codeIntel:status"),
+	codeIntelSave: (patch: CodeIntelUpdate): Promise<CodeIntelStatus> => ipcRenderer.invoke("codeIntel:save", patch),
+	codeIndexStatus: (cwd: string): Promise<IndexStatus> => ipcRenderer.invoke("codeIntel:indexStatus", cwd),
+	codeIntelModels: (): Promise<CodeIntelModels> => ipcRenderer.invoke("codeIntel:models"),
+	codeIndexRebuild: (cwd: string): Promise<IndexStatus> => ipcRenderer.invoke("codeIntel:rebuild", cwd),
+	onCodeIndexChanged: (listener: (status: IndexStatus) => void) => subscribe("codeIntel:indexChanged", listener),
+	tabComplete: (request: CompletionRequest): Promise<CompletionResponse> => ipcRenderer.invoke("codeIntel:complete", request),
+	tabCompleteCancel: (id: string): Promise<void> => ipcRenderer.invoke("codeIntel:cancelComplete", id),
+	promptsList: (): Promise<PromptsSnapshot> => ipcRenderer.invoke("prompts:list"),
+	promptsSave: (request: SavePromptRequest): Promise<PromptsSnapshot> => ipcRenderer.invoke("prompts:save", request),
+	promptsRemove: (id: string): Promise<PromptsSnapshot> => ipcRenderer.invoke("prompts:remove", id),
+	promptsSetActive: (id: string | null): Promise<PromptsSnapshot> => ipcRenderer.invoke("prompts:setActive", id),
 	webFavicon: (url: string): Promise<string | null> => ipcRenderer.invoke("web:favicon", url),
 
 	oauthList: (): Promise<OAuthProviderSummary[]> => ipcRenderer.invoke("oauth:list"),

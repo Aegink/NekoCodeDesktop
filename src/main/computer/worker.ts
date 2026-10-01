@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { CuaDriverLike } from "@trycua/cua-driver";
-import { RAISE_WINDOW, type ComputerCallResult, type WorkerRequest, type WorkerResponse } from "./protocol";
-import { raiseWindow } from "./window-raise";
+import { RAISE_WINDOW, WINDOW_CLASS, type ComputerCallResult, type WorkerRequest, type WorkerResponse } from "./protocol";
+import { raiseWindow, windowClass } from "./window-raise";
 
 /**
  * Utility-process entry that owns the Cua driver.
@@ -71,9 +71,10 @@ async function main(): Promise<void> {
 			running.get(request.id)?.abort();
 			return;
 		}
-		if (request.name === RAISE_WINDOW) {
+		if (request.name === RAISE_WINDOW || request.name === WINDOW_CLASS) {
 			try {
-				send({ type: "result", id: request.id, result: raiseWindow(request.args) });
+				const run = request.name === RAISE_WINDOW ? raiseWindow : windowClass;
+				send({ type: "result", id: request.id, result: run(request.args) });
 			} catch (error) {
 				send({ type: "error", id: request.id, message: errorMessage(error) });
 			}

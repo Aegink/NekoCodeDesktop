@@ -432,6 +432,14 @@ export class AgentService {
 	}
 
 	/**
+	 * A prompt was replaced or restored in settings. Setting the tools rebuilds
+	 * the system prompt, which reads the prompt library afresh.
+	 */
+	refreshPrompt(): void {
+		this.workflow?.refresh();
+	}
+
+	/**
 	 * Enabling changes no files, so no reload is needed — the gate reads the
 	 * plugin list on every tool call. The tool list the model sees does have to
 	 * be refreshed, or it would not know the tools appeared.

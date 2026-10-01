@@ -18,6 +18,8 @@ import { WebUiSettings } from "./WebUiSettings";
 import { ContextSettings } from "./ContextSettings";
 import { HooksSettings } from "./HooksSettings";
 import { WebToolsSettings } from "./WebToolsSettings";
+import { CodeIntelSettings } from "./CodeIntelSettings";
+import { PromptSettings } from "./PromptSettings";
 import { api } from "../../api";
 import { ArrowLeftIcon } from "../../lib/icons";
 
@@ -32,8 +34,10 @@ const SECTIONS = [
 	{ id: "providers", labelKey: "settings.section.providers", group: "models" },
 	{ id: "agents", labelKey: "settings.section.agents", group: "models" },
 	{ id: "tokens", labelKey: "settings.section.tokens", group: "models" },
+	{ id: "prompts", labelKey: "settings.section.prompts", group: "capabilities" },
 	{ id: "context", labelKey: "settings.section.context", group: "capabilities" },
 	{ id: "web", labelKey: "settings.section.web", group: "capabilities" },
+	{ id: "codeIntel", labelKey: "settings.section.codeIntel", group: "capabilities" },
 	{ id: "skills", labelKey: "settings.section.skills", group: "capabilities" },
 	{ id: "mcp", labelKey: "settings.section.mcp", group: "capabilities" },
 	{ id: "plugins", labelKey: "settings.section.plugins", group: "capabilities" },
@@ -74,7 +78,7 @@ export function SettingsPage({
 	// passwords are entered on the desktop, not over the network.
 	const sections =
 		api.runtime === "web"
-			? SECTIONS.filter((entry) => entry.id !== "webui" && entry.id !== "agents" && entry.id !== "ssh")
+			? SECTIONS.filter((entry) => entry.id !== "webui" && entry.id !== "agents" && entry.id !== "ssh" && entry.id !== "codeIntel")
 			: SECTIONS;
 
 	return (
@@ -125,9 +129,11 @@ export function SettingsPage({
 					{section === "providers" ? <ProviderModelSettings /> : null}
 					{section === "agents" && api.runtime !== "web" ? <AcpSettings /> : null}
 					{section === "tokens" ? <TokenUsageSettings /> : null}
+					{section === "prompts" ? <PromptSettings /> : null}
 					{section === "context" ? <ContextSettings cwd={cwd} projects={projects} /> : null}
 					{section === "hooks" ? <HooksSettings projects={projects} /> : null}
 					{section === "web" ? <WebToolsSettings /> : null}
+					{section === "codeIntel" && api.runtime !== "web" ? <CodeIntelSettings cwd={cwd} onOpenProviders={() => setSection("providers")} /> : null}
 					{section === "skills" ? <SkillSettings /> : null}
 					{section === "plugins" ? <PluginSettings /> : null}
 					{section === "mcp" ? <McpSettings /> : null}

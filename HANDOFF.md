@@ -37,7 +37,7 @@ relay**——桌面和手机登录同一 NekoCode 账号后通过服务端中转
 5. **改完必须全绿**（下面都要过）：
    ```bash
    ./node_modules/.bin/tsc --noEmit -p tsconfig.json    # 根：桌面 + mobile
-   bun test src scripts mobile/src                      # 265 passed
+   bun test test                                        # 测试都在 test/ 下，结构对应 src/、mobile/src/、scripts/
    bun run build                                        # electron-vite
    bun run mobile:build                                 # 成功；chunk >500kB 是 warning 不是失败
    cd server && ./node_modules/.bin/tsc --noEmit && bun test   # 50 passed

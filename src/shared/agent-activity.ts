@@ -29,6 +29,7 @@ const SUBJECT_KEYS: Record<string, readonly string[]> = {
 	web_search: ["query"],
 	web_fetch: ["url"],
 	code_search: ["query"],
+	semantic_search: ["query"],
 	task: ["description"],
 	github: ["op", "number", "query", "path"],
 };

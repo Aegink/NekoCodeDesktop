@@ -31,6 +31,7 @@ import { AST_EDIT_TOOL_NAME, AST_GREP_TOOL_NAME } from "./ast-tools";
 import { GITHUB_TOOL_NAME } from "./github-tool";
 import { SSH_TOOL_NAME } from "./ssh-tool";
 import { REMOTE_DESKTOP_TOOL_NAME } from "./remote-desktop/tool";
+import { SEMANTIC_SEARCH_TOOL_NAME } from "./semantic-search-tool";
 import {
 	AGENT_PHASES,
 	DEFAULT_AGENT_PHASE,
@@ -137,6 +138,7 @@ const readOnlyNames = new Set([
 	"task_status",
 	"task_cancel",
 	"code_search",
+	SEMANTIC_SEARCH_TOOL_NAME,
 ]);
 export interface PromptContext {
 	fusionRole?: "lead" | "sidekick";
@@ -188,6 +190,11 @@ export interface PromptContext {
 	 * a distraction — before there is anywhere to connect to.
 	 */
 	sshTools?: boolean;
+	/**
+	 * The code index is switched on in settings. Read-only, so it goes wherever
+	 * `grep` does — workers and Fast Context included.
+	 */
+	semanticSearch?: boolean;
 }
 
 /** The phase in force, or undefined for the modes that do not have one. */
@@ -222,6 +229,7 @@ export function toolsForMode(context: PromptContext): string[] {
 	const attended = !context.child && !context.headless;
 	const withMemory = [
 		...names,
+		...(context.semanticSearch && names.includes("grep") ? [SEMANTIC_SEARCH_TOOL_NAME] : []),
 		...(context.memoryTool && attended ? [MEMORY_TOOL_NAME] : []),
 		...(context.goal && attended ? [GOAL_TOOL_NAME] : []),
 	];
@@ -303,7 +311,12 @@ export function buildModePrompt(context: PromptContext): string {
 				: "本阶段可用 task：最多四个活动 worker，可写范围必须互不重叠；worker 没有 shell，父会话负责命令验证。"
 			: "本阶段没有 task，不能委派。",
 		tools.includes("code_search")
-			? "code_search 启动一次性的只读 Fast Context 子代理，返回带来源行号的精炼报告。面对跨模块或不熟悉位置的复杂任务时，先调用它再手动大范围搜索；已知文件、确切符号或小任务直接 read/grep，不必调用。编辑前仍需用普通 read/grep 核实其给出的候选。"
+			? context.fusionRole === "lead"
+				? "code_search 由 Sidekick 执行只读代码探索，返回带来源行号和关键原文片段的报告；Fusion 下它是查找代码的默认方式，按下文 Fusion · Lead 的分工使用。同一次回复中的多个 code_search 并行执行。"
+				: "code_search 启动一次性的只读 Fast Context 子代理，返回带来源行号的精炼报告。面对跨模块或不熟悉位置的复杂任务时，先调用它再手动大范围搜索；已知文件、确切符号或小任务直接 read/grep，不必调用。编辑前仍需用普通 read/grep 核实其给出的候选。"
+			: "",
+		tools.includes(SEMANTIC_SEARCH_TOOL_NAME)
+			? "semantic_search 按含义检索本工作区代码：不知道确切名字、要找“某个功能/逻辑在哪里实现”时先用它，用自然语言描述行为（可附上可能的标识符）；已知确切字符串或符号时直接 grep。结果是片段预览，修改前用 read 读取完整上下文。"
 			: "",
 		// These three are only as useful as the model's willingness to reach for
 		// them over grep, edit and a shell: their descriptions say what they do,
@@ -344,19 +357,28 @@ export function buildModePrompt(context: PromptContext): string {
 	]
 		.filter(Boolean)
 		.join("\n");
-	const prefix = common
-		.replace("{{MODEL_ID}}", () => context.modelId ?? "当前选择的模型")
-		.replace("{{RUNTIME_POLICY}}", policy);
+	// The user's own prompt stands in for the default role, rules and mode
+	// guidance — but only where a person chose it: helpers keep theirs. The
+	// runtime policy is appended either way, so tools and permissions hold.
+	const custom = context.child || context.fastContext ? null : customPrompt();
+	const model = () => context.modelId ?? "当前选择的模型";
+	// Replacers as functions: a `$&` or `$1` in the policy or a custom prompt is text, not a pattern.
+	const prefix =
+		custom === null
+			? common.replace("{{MODEL_ID}}", model).replace("{{RUNTIME_POLICY}}", () => policy)
+			: custom.replaceAll("{{MODEL_ID}}", model).trim() + "\n\n## 运行时策略（由运行时生成）\n" + policy;
 	const reminders =
-		context.mode === "plan"
-			? planReminder
-			: context.mode === "debug"
-				? debugInitial + "\n" + debugContinuing
-				: "";
+		custom !== null
+			? ""
+			: context.mode === "plan"
+				? planReminder
+				: context.mode === "debug"
+					? debugInitial + "\n" + debugContinuing
+					: "";
 	return [
 		prefix,
-		(phase && !automatic) || (context.fusionRole === "lead" && context.mode === "multitask") ? "" : prompts[context.mode],
-		phase ? phasePrompts[phase] : "",
+		custom !== null || (phase && !automatic) || (context.fusionRole === "lead" && context.mode === "multitask") ? "" : prompts[context.mode],
+		phase && custom === null ? phasePrompts[phase] : "",
 		context.fusionRole === "lead" ? FUSION_LEAD_PROMPT : "",
 		context.fusionRole === "sidekick" ? FUSION_SIDEKICK_PROMPT : "",
 		context.fastContext ? FAST_CONTEXT_PROMPT : "",
@@ -376,9 +398,15 @@ export function buildModePrompt(context: PromptContext): string {
 }
 
 export const FUSION_LEAD_PROMPT = `## Fusion · Lead
-你是主导模型：负责理解需求、规划、设计决策、调查和对正确性要求高的工作，审查辅助模型的结果并负责最终交付。
-本阶段有 task 时，优先将连贯的实施任务交给已配置的 Sidekick；模型及思考等级由用户配置，不能自行替换。简单问答或很小的任务直接完成，避免委派开销。没有 task 时按当前阶段工作。
-委派时传递必要背景、已确定的设计、相关路径、用户约束及验收条件，不复制完整对话，不重复调查。需要构建或测试时，按运行时规则选择具有 shell 能力的独占工作区任务；自己不能与写入 worker 同时修改其范围或执行 shell。
+你是主导模型：负责理解需求、拆解问题、规划、设计决策和对正确性要求高的判断，审查 Sidekick 的结果并负责最终交付。Sidekick 是用户配置的辅助模型（模型及思考等级不能自行替换），负责查找代码和实施。你的推理应花在判断与决策上，而不是逐个翻文件。
+### 查找代码交给 Sidekick
+- 需要定位代码、理解某个流程或调用链、收集修改所需上下文、确认功能是否存在、排查问题根因所在位置时，调用 code_search（由 Sidekick 执行），不要自己连续 grep/find/ls/read 摸索。问题写具体：要回答什么、已知线索（符号、路径、报错、用户描述）、需要返回哪些位置或片段。
+- 彼此独立的问题在同一次回复中发起多个 code_search，它们并行执行；一个问题的答案决定下一步时再串行追问。
+- 只在以下情况自己直接 read/grep：用户或报告已指明的具体文件与行范围、确切符号的一次精确查找、编辑前读取目标行（用 offset/limit 读片段，不整文件读）、审查 Sidekick 改动的具体位置。同一问题手动查找两次仍未定位，改用 code_search。
+- 报告已附原文片段时直接据此判断，不重复读取同一段代码；仅在证据不足、存在矛盾或即将编辑时核实。
+### 实施交给 Sidekick
+本阶段有 task 时，优先将连贯的实施任务交给 Sidekick。简单问答或很小的改动直接完成，避免委派开销。没有 task 时按当前阶段工作，查找代码仍交给 code_search。
+委派时传递必要背景、已确定的设计、相关路径（含 code_search 已给出的位置）、用户约束及验收条件，不复制完整对话；实施任务中 Sidekick 可自行读取其所需代码，你不必先替它读完。需要构建或测试时，按运行时规则选择具有 shell 能力的独占工作区任务；自己不能与写入 worker 同时修改其范围或执行 shell。
 Sidekick 不继承完整历史，用户的验证限制和已有决策必须明确传递。返回后审查变更与证据，针对疑点复核；失败先诊断再给出具体修正任务，不盲目重试或重复跑通过的检查。
 ### 视觉设计由 Lead 决定
 仅视觉任务需要 task.designSpec：先读相关页面及样式，由你决定构图、确切色值或已有 token、字体间距、关键形体比例、动画参数与响应式行为；按任务规模填写有关项，不能只给“精致、现代”等形容词让 Sidekick 自选风格。普通任务省略，微调只说明受影响的数值与保留项。
@@ -398,5 +426,15 @@ export const FUSION_SIDEKICK_PROMPT = `## Fusion · Sidekick
 
 export const FAST_CONTEXT_PROMPT = `## Fast Context · Explorer
 你是只读的代码探索子代理：理解自然语言请求，用独立的 grep/find/ls/read 并行展开搜索，沿调用路径读到足够代码后再回答。
-最终只返回精炼的 Markdown 结论，每条使用格式：- \`workspace/relative/path:start-end\` — 该位置为什么相关，以及你看到的证据。需要时可追加一行 \`Follow-up symbols: ...\` 列出值得继续查的符号。
+最终只返回精炼的 Markdown 结论，每条使用格式：- \`workspace/relative/path:start-end\` — 该位置为什么相关，以及你看到的证据。对回答请求起决定作用的位置，在该条下附上原文代码片段（每段不超过约 20 行，原样保留缩进，不改写），让调用方无需再读同一段代码；次要位置只给路径和说明。需要时可追加一行 \`Follow-up symbols: ...\` 列出值得继续查的符号。
 不实现、不修改、不做没有证据的论断，不转储整个文件，不输出 XML 或私有标签。若没有有依据的匹配，明确说明没有找到，并列出尝试过的搜索词和范围。`;
+
+let customPrompt: () => string | null = () => null;
+
+/**
+ * Point the library at the custom prompt in use, or null for the default one.
+ * Called once at startup, like the web tools; read on every prompt build.
+ */
+export function configureCustomPrompt(source: () => string | null): void {
+	customPrompt = source;
+}

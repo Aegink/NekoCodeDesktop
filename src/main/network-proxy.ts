@@ -1,4 +1,4 @@
-import { ProxyAgent, setGlobalDispatcher, getGlobalDispatcher, type Dispatcher } from "undici";
+import { EnvHttpProxyAgent, setGlobalDispatcher, getGlobalDispatcher, type Dispatcher } from "undici";
 
 /**
  * Routes the main process's outgoing requests through a proxy.
@@ -145,5 +145,16 @@ let directDispatcher: Dispatcher | undefined;
  */
 export function applyProxy(url: string | undefined): void {
 	directDispatcher ??= getGlobalDispatcher();
-	setGlobalDispatcher(url ? new ProxyAgent(url) : directDispatcher);
+	setGlobalDispatcher(url ? proxyDispatcher(url) : directDispatcher);
+}
+
+/**
+ * This machine is never behind the proxy: a local model server (Ollama, LM
+ * Studio) or a self-hosted service on loopback has to be reached directly, and
+ * most proxies refuse or loop on a request for their own host's localhost.
+ */
+export const LOOPBACK_NO_PROXY = "localhost,127.0.0.1,::1,[::1]";
+
+export function proxyDispatcher(url: string): Dispatcher {
+	return new EnvHttpProxyAgent({ httpProxy: url, httpsProxy: url, noProxy: LOOPBACK_NO_PROXY });
 }

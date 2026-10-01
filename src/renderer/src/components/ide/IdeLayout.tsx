@@ -5,6 +5,7 @@ import type { RepoStatus } from "../../../../shared/git";
 import { api } from "../../api";
 import { useTranslation } from "../../i18n";
 import { NewThreadIcon } from "../../lib/icons";
+import { startResizeDrag } from "../../lib/resizeDrag";
 import { cn } from "../../lib/utils";
 import { CHAT_MAIN_CONTENT_SURFACE_CLASS_NAME } from "../chat/composerPickerStyles";
 import { TerminalPanel } from "../TerminalPanel";
@@ -55,33 +56,23 @@ function useDrag(
 	setValue: (next: number) => void,
 	options: { axis: "x" | "y"; sign: 1 | -1; min: number; max: () => number; storageKey: string },
 ) {
-	return (event: React.MouseEvent) => {
-		event.preventDefault();
-		const start = options.axis === "x" ? event.clientX : event.clientY;
-		const initial = value;
-		let latest = value;
-		const onMove = (move: MouseEvent) => {
-			const delta = ((options.axis === "x" ? move.clientX : move.clientY) - start) * options.sign;
-			latest = Math.round(Math.min(options.max(), Math.max(options.min, initial + delta)));
-			setValue(latest);
-		};
-		const onUp = () => {
-			window.removeEventListener("mousemove", onMove);
-			window.removeEventListener("mouseup", onUp);
-			document.body.style.cursor = "";
-			writeStored(options.storageKey, String(latest));
-		};
-		document.body.style.cursor = options.axis === "x" ? "col-resize" : "row-resize";
-		window.addEventListener("mousemove", onMove);
-		window.addEventListener("mouseup", onUp);
-	};
+	return (event: React.PointerEvent<HTMLElement>) =>
+		startResizeDrag(event, {
+			...options,
+			initial: value,
+			onFrame: setValue,
+			onEnd: (size) => {
+				setValue(size);
+				writeStored(options.storageKey, String(size));
+			},
+		});
 }
 
-function Splitter({ axis, onMouseDown }: { axis: "x" | "y"; onMouseDown: (event: React.MouseEvent) => void }) {
+function Splitter({ axis, onPointerDown }: { axis: "x" | "y"; onPointerDown: (event: React.PointerEvent<HTMLElement>) => void }) {
 	return (
 		<div
 			aria-hidden="true"
-			onMouseDown={onMouseDown}
+			onPointerDown={onPointerDown}
 			className={cn(
 				"relative z-10 shrink-0 bg-transparent transition-colors hover:bg-[var(--color-text-accent)]/40",
 				axis === "x" ? "-mx-0.5 w-1 cursor-col-resize" : "-my-0.5 h-1 cursor-row-resize",
@@ -454,7 +445,7 @@ function IdeWorkbench({
 								<ScmPanel ws={ws} repo={repo} onRefresh={refreshGit} />
 							)}
 						</div>
-						<Splitter axis="x" onMouseDown={startSideDrag} />
+						<Splitter axis="x" onPointerDown={startSideDrag} />
 					</>
 				) : null}
 
@@ -486,7 +477,7 @@ function IdeWorkbench({
 					) : null}
 					{terminalOpen ? (
 						<>
-							<Splitter axis="y" onMouseDown={startTerminalDrag} />
+							<Splitter axis="y" onPointerDown={startTerminalDrag} />
 							<div className="flex shrink-0 flex-col border-t border-[color:var(--app-surface-divider)]" style={{ height: terminalHeight }}>
 								<TerminalPanel cwd={cwd} docked onClose={() => setTerminalOpen(false)} />
 							</div>
@@ -496,7 +487,7 @@ function IdeWorkbench({
 
 				{chatOpen ? (
 					<>
-						<Splitter axis="x" onMouseDown={startChatDrag} />
+						<Splitter axis="x" onPointerDown={startChatDrag} />
 						<aside
 							ref={chatRef}
 							className={cn(

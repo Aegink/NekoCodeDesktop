@@ -28,6 +28,8 @@ export interface ComputerCallResult {
  * cannot collide with a driver tool name, which are plain snake_case.
  */
 export const RAISE_WINDOW = "nekocode.raise_window";
+/** The class name of a top-level window, which says what UI framework drew it. */
+export const WINDOW_CLASS = "nekocode.window_class";
 
 export type WorkerRequest =
 	| { type: "call"; id: number; name: string; args: Record<string, unknown> }

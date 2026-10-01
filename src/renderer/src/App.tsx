@@ -44,6 +44,7 @@ import { TitleBar } from "./components/TitleBar";
 import { ChatSlot, createChatHost } from "./components/ChatSlot";
 import { SplitGrid } from "./components/SplitGrid";
 import { useSplitPanes, type PaneSlot } from "./hooks/useSplitPanes";
+import { startResizeDrag } from "./lib/resizeDrag";
 import { startSessionDrag, type DraggedSession } from "./lib/sessionDrag";
 import type { DropPlan } from "./lib/splitLayout";
 import { DragHandleIcon, Maximize2, XIcon } from "./lib/icons";
@@ -241,7 +242,12 @@ export default function App() {
 			? stored
 			: DEFAULT_DOCK_WIDTH;
 	});
-	const dockDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+	// Mid-drag the width goes straight to these two, not through state: a render
+	// of the whole app per pointer move is what made the drag trail the cursor.
+	const dockAsideRef = useRef<HTMLElement>(null);
+	const dockInnerRef = useRef<HTMLDivElement>(null);
+	/** The width transition is for opening and closing; under a drag it lags and gaps. */
+	const [dockResizing, setDockResizing] = useState(false);
 
 	// Agent or IDE. The IDE is a desktop feature: the WebUI and the phone app
 	// never offer it.
@@ -915,33 +921,24 @@ export default function App() {
 		else panes.drop(session, plan);
 	};
 
-	const startDockDrag = (event: React.MouseEvent) => {
-		event.preventDefault();
-		dockDragRef.current = { startX: event.clientX, startWidth: dockWidth };
-		const onMove = (moveEvent: MouseEvent) => {
-			const drag = dockDragRef.current;
-			if (!drag) return;
-			const maxWidth = Math.max(
-				MIN_DOCK_WIDTH,
-				window.innerWidth - MIN_CHAT_WIDTH,
-			);
-			const next = Math.min(
-				maxWidth,
-				Math.max(MIN_DOCK_WIDTH, drag.startWidth - (moveEvent.clientX - drag.startX)),
-			);
-			setDockWidth(next);
-		};
-		const onUp = () => {
-			dockDragRef.current = null;
-			window.removeEventListener("mousemove", onMove);
-			window.removeEventListener("mouseup", onUp);
-			setDockWidth((width) => {
+	const startDockDrag = (event: React.PointerEvent<HTMLElement>) => {
+		setDockResizing(true);
+		startResizeDrag(event, {
+			axis: "x",
+			sign: -1,
+			initial: dockWidth,
+			min: MIN_DOCK_WIDTH,
+			max: () => window.innerWidth - MIN_CHAT_WIDTH,
+			onFrame: (width) => {
+				if (dockAsideRef.current) dockAsideRef.current.style.width = `${width}px`;
+				if (dockInnerRef.current) dockInnerRef.current.style.width = `${width}px`;
+			},
+			onEnd: (width) => {
+				setDockWidth(width);
+				setDockResizing(false);
 				writeStored(DOCK_WIDTH_STORAGE_KEY, String(width));
-				return width;
-			});
-		};
-		window.addEventListener("mousemove", onMove);
-		window.addEventListener("mouseup", onUp);
+			},
+		});
 	};
 
 	return (
@@ -1080,21 +1077,24 @@ export default function App() {
 					<div
 						aria-hidden="true"
 						className="w-1 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-[var(--color-background-button-secondary-hover)]"
-						onMouseDown={startDockDrag}
+						onPointerDown={startDockDrag}
 					/>
 				) : null}
 				{/* The dock stays mounted while collapsed so its width transition can
 				    play and opened tools keep their state; `invisible` panes inside
 				    keep webviews laid out rather than torn down. */}
 				<aside
+					ref={dockAsideRef}
 					aria-hidden={!dockOpen}
 					className={cn(
-						"shrink-0 overflow-hidden transition-[width] duration-200 ease-out",
+						"shrink-0 overflow-hidden",
+						!dockResizing && "transition-[width] duration-200 ease-out",
 						!dockOpen && "pointer-events-none",
 					)}
 					style={{ width: dockOpen ? dockWidth : 0 }}
 				>
 					<div
+						ref={dockInnerRef}
 						className="flex h-full flex-col overflow-hidden rounded-tl-lg border-l border-[color:var(--app-surface-divider)]"
 						style={{ width: dockWidth }}
 					>

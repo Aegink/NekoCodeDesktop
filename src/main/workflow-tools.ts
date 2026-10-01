@@ -16,6 +16,7 @@ function define<T extends TSchema>(
 	description: string,
 	parameters: T,
 	action: (args: Static<T>, signal?: AbortSignal, toolCallId?: string) => Promise<unknown>,
+	executionMode: "sequential" | "parallel" = "sequential",
 ): ToolDefinition {
 	return {
 		name,
@@ -23,7 +24,7 @@ function define<T extends TSchema>(
 		description,
 		promptSnippet: description,
 		parameters,
-		executionMode: "sequential",
+		executionMode,
 		async execute(id, params, signal) {
 			if (signal?.aborted) throw new Error("Tool call cancelled");
 			const data = await action(params as Static<T>, signal, id);
@@ -131,9 +132,12 @@ export function createWorkflowTools(host: WorkflowToolHost): ToolDefinition[] {
 		),
 		define(
 			"code_search",
-			"Fast Context: launch a fresh isolated read-only explorer subagent over the repository and get back a compact Markdown report of `path:start-end` findings with evidence. Prefer it before broad manual exploration for complex or cross-module questions and unknown code locations; skip it for known files, exact symbols, or small tasks, and verify its candidates with ordinary read/grep before editing.",
+			"Fast Context: launch a fresh isolated read-only explorer subagent over the repository and get back a compact Markdown report of `path:start-end` findings with evidence and key excerpts. Prefer it before broad manual exploration for complex or cross-module questions and unknown code locations; skip it for known files, exact symbols, or small tasks, and read the target lines before editing. Independent searches issued in the same response run in parallel.",
 			object({ query: text(30000) }),
 			(args, signal, id) => host.searchCode(args.query, signal, id),
+			// Each call is its own isolated read-only session, so several can fan
+			// out at once; one sequential tool in a batch would serialize them all.
+			"parallel",
 		),
 		define(
 			"commit_message",

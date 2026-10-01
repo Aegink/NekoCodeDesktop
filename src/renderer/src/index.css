@@ -3518,6 +3518,26 @@ diffs-container {
   pointer-events: none !important;
 }
 
+/* A splitter is being dragged (lib/resizeDrag). Embedded pages would swallow
+   the pointer as it crosses them, and every element with its own cursor or
+   selectable text would flicker under it; for the drag, none of them count. */
+.app-resizing,
+.app-resizing * {
+  user-select: none !important;
+}
+.app-resizing[data-resize-axis="x"],
+.app-resizing[data-resize-axis="x"] * {
+  cursor: col-resize !important;
+}
+.app-resizing[data-resize-axis="y"],
+.app-resizing[data-resize-axis="y"] * {
+  cursor: row-resize !important;
+}
+.app-resizing webview,
+.app-resizing iframe {
+  pointer-events: none !important;
+}
+
 /* ─── Split chat area ──────────────────────────────────────────────────────────
    Up to four conversations side by side (SplitGrid). One pane fills the area
    edge to edge exactly as the single chat always has; from two on, the area

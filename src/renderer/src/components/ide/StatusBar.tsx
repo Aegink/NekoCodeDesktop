@@ -1,11 +1,12 @@
 import { useState, useSyncExternalStore } from "react";
-import { VscError, VscSourceControl, VscWarning } from "react-icons/vsc";
+import { VscError, VscSourceControl, VscSparkle, VscWarning } from "react-icons/vsc";
 import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Spinner } from "../ui/spinner";
 import { ContextMenu, type ContextMenuState } from "./ContextMenu";
 import type { EditorAreaHandle, EditorStatus } from "./EditorArea";
 import type { IdeWorkspace } from "./ide-store";
+import { setTabCompletionEnabled, tabCompletionStore } from "./tab-completion";
 
 /** The languages offered when the user overrides detection; Monaco knows many more. */
 const COMMON_LANGUAGES: Array<[string, string]> = [
@@ -82,6 +83,7 @@ export function StatusBar({
 	const { t } = useTranslation();
 	useSyncExternalStore(ws?.subscribe ?? noSubscribe, ws?.getVersion ?? noVersion);
 	const [menu, setMenu] = useState<ContextMenuState | null>(null);
+	const completion = useSyncExternalStore(tabCompletionStore.subscribe, tabCompletionStore.getSnapshot);
 
 	const menuAt = (event: React.MouseEvent<HTMLButtonElement>, items: ContextMenuState["items"]) => {
 		const box = event.currentTarget.getBoundingClientRect();
@@ -153,6 +155,18 @@ export function StatusBar({
 					</Item>
 				</>
 			) : null}
+			<Item
+				onClick={() => void setTabCompletionEnabled(completion.state === "off").catch(() => {})}
+				title={
+					completion.state === "error" && completion.error
+						? completion.error
+						: t(`ide.status.tab.${completion.state}Hint` as const)
+				}
+				className={cn(completion.state === "error" && "text-[var(--warning,#d97706)]")}
+			>
+				{completion.state === "loading" ? <Spinner className="size-3" /> : <VscSparkle className="size-3" />}
+				{t(completion.state === "off" ? "ide.status.tab.off" : "ide.status.tab.on")}
+			</Item>
 			{ws ? (
 				<Item onClick={() => ws.setAutoSave(!ws.autoSave)} title={t("ide.status.autoSaveHint")}>
 					{ws.autoSave ? t("ide.status.autoSaveOn") : t("ide.status.autoSaveOff")}

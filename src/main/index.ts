@@ -105,6 +105,16 @@ import { createAstGrepTool } from "./ast-tools";
 import { createGithubTool } from "./github-tool";
 import { createStatTool } from "./file-tools";
 import { WebToolsStore } from "./web-tools-store";
+import { CodeIntelStore } from "./code-intel-store";
+import { SemanticIndexService } from "./semantic-index/service";
+import { configureSemanticSearch, createSemanticSearchTool, semanticSearchEnabled } from "./semantic-search-tool";
+import { TabCompletionService } from "./tab-completion";
+import { askModel, type ModelCallRuntime } from "./model-call";
+import type { CodeIntelModels, CodeIntelUpdate, CompletionRequest } from "../shared/code-intel";
+import { codeIntelModelList } from "./code-intel-models";
+import { PromptStore } from "./prompt-store";
+import { configureCustomPrompt } from "./prompt-library";
+import type { PromptsSnapshot, SavePromptRequest } from "../shared/prompts";
 import { SshStore } from "./ssh-store";
 import { SshService } from "./ssh-service";
 import { configureSshTool } from "./ssh-tool";
@@ -195,10 +205,62 @@ let taskNotifier: TaskNotifier | null = null;
 /** Outlives the window: preferences are read again when one is reopened. */
 let preferences: AppPreferencesStore | null = null;
 let webToolsStore: WebToolsStore | null = null;
+let promptStore: PromptStore | null = null;
+function prompts(): PromptStore {
+	promptStore ??= new PromptStore(app.getPath("userData"));
+	return promptStore;
+}
 /** Lazily, as safeStorage is only usable once the app is ready and the keyring settled. */
 function webTools(): WebToolsStore {
 	webToolsStore ??= new WebToolsStore(app.getPath("userData"), safeStorage);
 	return webToolsStore;
+}
+let codeIntelStore: CodeIntelStore | null = null;
+function codeIntel(): CodeIntelStore {
+	codeIntelStore ??= new CodeIntelStore(app.getPath("userData"));
+	return codeIntelStore;
+}
+/** The runtime that reaches every model under Providers and models. */
+async function modelCallRuntime(): Promise<ModelCallRuntime> {
+	if (!taskManager) throw new Error("Agent service is not running");
+	return (await taskManager.active.getModelRuntime()) as unknown as ModelCallRuntime;
+}
+let semanticIndex: SemanticIndexService | null = null;
+/** Window-independent: an index outlives the window that asked for it. */
+function semanticIndexService(): SemanticIndexService {
+	semanticIndex ??= new SemanticIndexService({
+		// Read on every search, so a newly picked model applies at once.
+		getAssistant: () => {
+			const model = codeIntel().status().searchModel;
+			if (!model) return null;
+			return {
+				model,
+				ask: async (systemPrompt, prompt, signal) =>
+					askModel(await modelCallRuntime(), model, systemPrompt, prompt, {
+						maxTokens: 1024,
+						reasoningMaxTokens: 4096,
+						timeoutMs: 30_000,
+						signal,
+					}),
+			};
+		},
+		onStatus: (status) => {
+			for (const window of BrowserWindow.getAllWindows()) {
+				if (!window.isDestroyed()) window.webContents.send("codeIntel:indexChanged", status);
+			}
+		},
+	});
+	return semanticIndex;
+}
+let tabCompletion: TabCompletionService | null = null;
+function tabCompletionService(): TabCompletionService {
+	tabCompletion ??= new TabCompletionService({
+		settings: () => codeIntel().status().completion,
+		getRuntime: modelCallRuntime,
+		related: (cwd, text, excludePath, limit) =>
+			codeIntel().status().indexEnabled ? semanticIndexService().related(cwd, text, excludePath, limit) : Promise.resolve([]),
+	});
+	return tabCompletion;
 }
 let sshState: { store: SshStore; service: SshService } | null = null;
 /** Lazily for the same reason; window-independent, since saved hosts outlive a window. */
@@ -287,7 +349,8 @@ let toolServer: McpToolServer | null = null;
  * built by the same factories, so both workspaces run one implementation.
  *
  * NekoLocal's read-only code tools ride along: file reading and search,
- * structural search, GitHub, and web access when it is switched on. Agents
+ * structural search, semantic search over the code index, GitHub, and web
+ * access when it is switched on. Agents
  * differ in what they bring — Codex reads the repository through its shell —
  * and these give every agent the same vocabulary. Nothing here writes: an
  * agent's own permission mode or sandbox cannot see a tool served from
@@ -328,6 +391,7 @@ async function acpToolServers(session: { sessionId: string; cwd: string }): Prom
 		createLsToolDefinition(session.cwd),
 		createStatTool(session.cwd),
 		createAstGrepTool(session.cwd),
+		...(semanticSearchEnabled() ? [createSemanticSearchTool(session.cwd)] : []),
 		createGithubTool(session.cwd),
 	];
 	const webTools = createWebTools();
@@ -1524,10 +1588,53 @@ function registerIpc(): void {
 	ipcMain.handle("settings:proxyStatus", () => proxyService?.current());
 	ipcMain.handle("settings:saveProxy", (_e, manual: string | null) => proxyService?.save(manual));
 	ipcMain.handle("settings:webToolsStatus", async () => ({ ...webTools().status(), accounts: await webSearchAccounts() }));
+	ipcMain.handle("codeIntel:status", () => codeIntel().status());
+	ipcMain.handle("codeIntel:save", (_e, patch: CodeIntelUpdate) => {
+		const status = codeIntel().update(patch ?? {});
+		// Sessions pick the tool up or drop it on their next model call.
+		if (patch?.indexEnabled !== undefined) taskManager?.refreshPrompts();
+		return status;
+	});
+	ipcMain.handle("codeIntel:indexStatus", (_e, cwd: string) => {
+		const service = semanticIndexService();
+		if (codeIntel().status().indexEnabled) service.warm(cwd);
+		return service.status(cwd);
+	});
+	// The models code intelligence can pick from, without touching the agent's own state.
+	ipcMain.handle("codeIntel:models", async (): Promise<CodeIntelModels> => {
+		// Custom API providers from their saved profiles; accounts from the runtime,
+		// once any refresh in flight has settled.
+		const profiles = (modelConfig?.list() ?? []).filter((profile) => profile.kind === "custom-api");
+		const runtime = await taskManager?.active.getModelRuntime().catch(() => null);
+		const available = runtime ? await runtime.getAvailable().catch(() => runtime.getAvailableSnapshot()) : [];
+		return {
+			chat: codeIntelModelList(profiles, available, (provider) => runtime?.getProvider(provider)?.name ?? provider),
+		};
+	});
+	ipcMain.handle("codeIntel:rebuild", (_e, cwd: string) => semanticIndexService().rebuild(cwd));
+	ipcMain.handle("codeIntel:complete", (_e, request: CompletionRequest) => tabCompletionService().complete(request));
+	ipcMain.handle("codeIntel:cancelComplete", (_e, id: string) => tabCompletion?.cancel(id));
 	ipcMain.handle("settings:saveWebTools", async (_e, patch: WebToolsUpdate) => ({
 		...webTools().update(patch ?? {}),
 		accounts: await webSearchAccounts(),
 	}));
+	// The default prompt's text is never sent: the page only lists the user's own.
+	ipcMain.handle("prompts:list", () => prompts().snapshot());
+	// Open sessions rebuild their system prompt at once, so the next model call
+	// already uses what changed.
+	const changedPrompts = (snapshot: PromptsSnapshot) => {
+		taskManager?.refreshPrompts();
+		return snapshot;
+	};
+	ipcMain.handle("prompts:save", (_e, request: SavePromptRequest) => changedPrompts(prompts().save(request)));
+	ipcMain.handle("prompts:remove", (_e, id: unknown) => {
+		if (typeof id !== "string") throw new Error("Invalid prompt id");
+		return changedPrompts(prompts().remove(id));
+	});
+	ipcMain.handle("prompts:setActive", (_e, id: unknown) => {
+		if (id !== null && typeof id !== "string") throw new Error("Invalid prompt id");
+		return changedPrompts(prompts().setActive(id));
+	});
 	ipcMain.handle("web:favicon", (_e, url: unknown) => (typeof url === "string" ? faviconFor(url) : null));
 
 	ipcMain.handle("oauth:list", () => oauthService?.list());
@@ -1681,6 +1788,12 @@ app.whenReady().then(async () => {
 	// Chromium picked is often unreachable, and only a relaunch can switch.
 	const keyring = settleLinuxKeyring(safeStorage, app);
 	if (keyring === "relaunching") return;
+	// Before any session is made: every prompt it builds reads the user's replacements.
+	configureCustomPrompt(() => prompts().activeContent());
+	configureSemanticSearch({
+		enabled: () => codeIntel().status().indexEnabled,
+		service: () => semanticIndexService(),
+	});
 	if (keyring === "basic_text") console.warn("No system keyring this session; secrets use Electron's local key.");
 	if (process.platform === "darwin") app.dock?.setIcon(appIconPng);
 	if (process.platform !== "darwin") Menu.setApplicationMenu(null);
@@ -1751,6 +1864,7 @@ app.on("before-quit", () => {
 	acpService?.dispose();
 	toolServer?.close();
 	computerUse?.dispose();
+	semanticIndex?.dispose();
 	qqBotService?.close();
 	relayService?.close();
 	relayService = null;

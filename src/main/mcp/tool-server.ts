@@ -192,7 +192,7 @@ export class McpToolServer {
 					capabilities: { tools: { listChanged: false } },
 					serverInfo: { name: "nekocode", title: "NekoCode", version: this.options.version },
 					instructions:
-						"NekoCode's own tools: read-only code tools for this workspace (read, grep, find, ls, stat, ast_grep for structural search, github for PRs/issues/CI), web_search and web_fetch when web access is on, the browser panel in the NekoCode window and, when enabled in its settings, Computer Use on this desktop.",
+						"NekoCode's own tools: read-only code tools for this workspace (read, grep, find, ls, stat, ast_grep for structural search, semantic_search to find code by meaning when the code index is on, github for PRs/issues/CI), web_search and web_fetch when web access is on, the browser panel in the NekoCode window and, when enabled in its settings, Computer Use on this desktop.",
 				});
 			}
 			case "ping":

@@ -1,6 +1,6 @@
 {
   "name": "nekocode-desktop",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "NekoCode Desktop - Electron desktop coding agent built on the PI agent core",
   "author": "ChuxinNeko",
@@ -26,8 +26,8 @@
     "mobile:dev": "vite --config mobile/vite.config.ts",
     "mobile:build": "vite build --config mobile/vite.config.ts",
     "mobile:sync": "bun run mobile:build && cap sync android",
-    "test": "bun test src scripts mobile/src",
-    "test:lan": "bun test src/main/task-manager.test.ts src/main/lan-service.test.ts mobile/src/lan-client.test.ts src/shared/lan-pairing.test.ts",
+    "test": "bun test test",
+    "test:lan": "bun test test/main/task-manager.test.ts test/main/lan-service.test.ts test/mobile/lan-client.test.ts test/shared/lan-pairing.test.ts",
     "test:lan:integration": "bun scripts/test-lan-integration.ts",
     "mobile:apk": "bun scripts/build-android.ts",
     "mobile:sync:ios": "bun run mobile:build && cap sync ios",

@@ -57,6 +57,7 @@ export function stepSubject(step: ToolStep): StepSubject {
 		}
 		case "grep":
 		case "ast_grep":
+		case "semantic_search":
 		case "find": {
 			const pattern = field(args, "pattern") ?? field(args, "query") ?? args;
 			const where = field(args, "path") ?? field(args, "glob");

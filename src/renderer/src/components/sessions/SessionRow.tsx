@@ -11,8 +11,9 @@ import {
 } from "../../lib/sidebarRowStyles";
 import { cn } from "../../lib/utils";
 import { startSessionDrag } from "../../lib/sessionDrag";
+import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
 import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopupBase, MenuSeparator, MenuTrigger } from "../ui/menu";
+import { Menu, MenuItem, MenuSeparator, MenuTrigger } from "../ui/menu";
 
 export interface SessionRowProps {
 	hideActions?: boolean;
@@ -196,14 +197,19 @@ export function SessionRow(props: SessionRowProps) {
 						<EllipsisIcon className="size-3.5" />
 					</MenuTrigger>
 					{/* Opaque fill, not the default translucent shell: this menu opens over
-					    a dense list of titles, which read straight through a 70% surface. */}
-					<MenuPopupBase align="end" className="bg-popover" side="bottom" surface="composer">
-						<MenuItem onClick={props.onStartRename}>{t("sessions.rename")}</MenuItem>
+					    a dense list of titles, which read straight through a 70% surface.
+					    Fixed, tighter corners than the composer pickers (the theme scales the
+					    rounded-* tokens up): two short rows at the picker radii read as
+					    pills. Options sit 4px in, so 8px − 4px keeps the corners concentric. */}
+					<ComposerPickerMenuPopup align="end" className="min-w-28 rounded-[8px] bg-popover" side="bottom">
+						<MenuItem className="rounded-[4px]" onClick={props.onStartRename}>
+							{t("sessions.rename")}
+						</MenuItem>
 						<MenuSeparator />
-						<MenuItem onClick={props.onStartDelete} variant="destructive">
+						<MenuItem className="rounded-[4px]" onClick={props.onStartDelete} variant="destructive">
 							{t("common.delete")}
 						</MenuItem>
-					</MenuPopupBase>
+					</ComposerPickerMenuPopup>
 				</Menu>}
 			</span>
 		</div>

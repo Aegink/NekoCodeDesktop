@@ -22,6 +22,7 @@ import type { IdeTab, IdeWorkspace } from "./ide-store";
 import { extensionRuntime } from "./extension-runtime";
 import { languageLabel, monaco } from "./monaco-setup";
 import { PanelIconButton } from "./PanelChrome";
+import { attachTabCompletion } from "./tab-completion";
 
 export interface EditorStatus {
 	relPath: string;
@@ -98,6 +99,7 @@ const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	mouseWheelZoom: true,
 	linkedEditing: true,
 	formatOnPaste: false,
+	inlineSuggest: { enabled: true, showToolbar: "onHover" },
 	tabSize: 2,
 	scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10, useShadows: false },
 };
@@ -157,6 +159,9 @@ export const EditorArea = forwardRef<
 	const [instruction, setInstruction] = useState("");
 	const [inlineBusy, setInlineBusy] = useState(false);
 	const [reloadNotice, setReloadNotice] = useState(false);
+
+	// Tab completion serves this workspace's files while it is open.
+	useEffect(() => attachTabCompletion(ws.cwd), [ws.cwd]);
 
 	const active = ws.activeTab;
 	const doc = active ? ws.docs.get(active.relPath) : undefined;

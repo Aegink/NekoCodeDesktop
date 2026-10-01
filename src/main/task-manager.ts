@@ -377,6 +377,11 @@ export class TaskManager {
 		await Promise.all([...this.agents].filter((s) => s !== this.owner).map((s) => s.reloadConfiguredModels(false)));
 	}
 
+	/** Every open session rebuilds its system prompt from the prompts now in settings. */
+	refreshPrompts(): void {
+		for (const agent of this.agents) agent.refreshPrompt();
+	}
+
 	/** Every open session re-reads its project instructions; see {@link AgentService.reloadContext}. */
 	async reloadContext(): Promise<void> {
 		// One at a time: a reload resets the core's provider registry, which is

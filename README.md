@@ -273,6 +273,11 @@ bun run build       # 构建
 
 - [earendil-works/pi](https://github.com/earendil-works/pi) — Agent 内核与工具集。
 
+
+
+## 社区
+- [Linux.do](https://linux.do/)
+
 ## PI 原生工作模式
 
 输入框新增独立的工作模式选择：**Agent / Ask / Plan / Debug / Multitask**。原来的“只读 / 自动 / 完全访问”仍是执行权限，不与工作模式混用。

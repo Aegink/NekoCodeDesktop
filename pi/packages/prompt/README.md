@@ -59,6 +59,8 @@
 
 加载入口：src/main/prompt-library.ts，通过 Vite 的 raw import 将资产嵌入主进程产物，不依赖打包后的源码目录。仅 MODEL_ID / RUNTIME_POLICY 是模板变量，由实际会话状态替换；Todo/任务的有界状态也会附在系统提示词中。
 
+用户提示词：设置 → 提示词 列出“默认提示词”（即本目录的内置提示词，界面不显示其内容，主进程也不会把原文发给渲染进程）和用户添加的自定义提示词，全局单选一条，保存在 userData/prompts.json。选用自定义提示词时，它替换 common_prefix、各模式 prompt.md、阶段提示词与 Plan/Debug 提醒；RUNTIME_POLICY（模式、权限、工具清单与工具指导）、工作流状态、记忆与目标照常附加，tools.json 与运行时权限检查不受影响。Fusion、Fast Context、子会话、Commit 与 Compaction 始终使用本目录的内置提示词。
+
 PI 的 AGENTS.md、Skills、APPEND_SYSTEM.md 仍由资源加载器处理。桌面端会将用户 SYSTEM.md 作为模式规则后的自定义补充，而不是让它替换权限边界。隔离 helper 不加载扩展；Commit 不继承项目提示词。
 
 PI 的自定义系统提示词分支保留当前活动工具的 promptGuidelines，去重后追加，不恢复默认 persona；阶段收紧工具时，相应指导也随之移除。Fusion 保留各阶段纪律，视觉规格按任务规模填写 designSpec。

@@ -447,6 +447,14 @@ function toolPresentation(cell: ToolCellData, t: TranslateFn): ToolPresentation 
 				icon: FileIcon,
 			};
 		}
+		case "semantic_search":
+			return {
+				label: t("tool.semanticSearched"),
+				subject: stringArg(cell, "query") ?? argsSummary(cell),
+				icon: SearchIcon,
+				prose: true,
+				meta: stringArg(cell, "path") ?? undefined,
+			};
 		case "ast_grep":
 			return { label: t("tool.astSearched"), subject: stringArg(cell, "pattern") ?? argsSummary(cell), icon: CodeIcon };
 		case "ast_edit":
@@ -761,10 +769,17 @@ const SCROLL_ICONS: Record<string, LucideIcon> = { up: ArrowUpIcon, down: ArrowD
 
 /** One desktop action, the way the on-screen agent cursor labels it. */
 function computerStep(cell: ToolCellData, t: TranslateFn): { icon: LucideIcon; verb: string; detail: string | null } {
+	const named = stringArg(cell, "target");
 	const element = numberArg(cell, "element_index");
 	const x = numberArg(cell, "x");
 	const y = numberArg(cell, "y");
-	const target = element !== null ? `#${element}` : x !== null && y !== null ? `(${Math.round(x)}, ${Math.round(y)})` : null;
+	const target = named
+		? `“${clip(named, 28)}”`
+		: element !== null
+			? `#${element}`
+			: x !== null && y !== null
+				? `(${Math.round(x)}, ${Math.round(y)})`
+				: null;
 	switch (cell.toolName) {
 		case "computer_click": {
 			const right = stringArg(cell, "button") === "right";
@@ -792,6 +807,14 @@ function computerStep(cell: ToolCellData, t: TranslateFn): { icon: LucideIcon; v
 		case "computer_get_window_state": {
 			const query = stringArg(cell, "query");
 			return { icon: EyeIcon, verb: t("computer.readWindow"), detail: query ? `“${clip(query, 24)}”` : null };
+		}
+		case "computer_menu":
+			return { icon: PointerIcon, verb: t("computer.menu"), detail: stringListArg(cell, "path").join(" › ") || null };
+		case "computer_wait":
+			return { icon: EyeIcon, verb: t("computer.wait"), detail: `“${clip(stringArg(cell, "text") ?? "", 24)}”` };
+		case "computer_sequence": {
+			const steps = (cell.args as { steps?: unknown } | undefined)?.steps;
+			return { icon: PointerIcon, verb: t("computer.sequence"), detail: Array.isArray(steps) ? t("computer.steps", { count: steps.length }) : null };
 		}
 		case "computer_list_windows":
 			return { icon: WindowIcon, verb: t("computer.listWindows"), detail: null };

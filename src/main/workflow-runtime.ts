@@ -58,6 +58,7 @@ import { createReadTool } from "./read-tool";
 import { createWriteTool } from "./write-tool";
 import { createWebTools, WEB_TOOL_NAMES, webToolsEnabled } from "./web-tools";
 import { AST_EDIT_TOOL_NAME, AST_GREP_TOOL_NAME, createAstEditTool, createAstGrepTool } from "./ast-tools";
+import { createSemanticSearchTool, SEMANTIC_SEARCH_TOOL_NAME, semanticSearchEnabled } from "./semantic-search-tool";
 import { createGithubTool, GITHUB_TOOL_NAME } from "./github-tool";
 import { createSshTool, sshToolAvailable } from "./ssh-tool";
 import { createRemoteDesktopTool } from "./remote-desktop/tool";
@@ -365,6 +366,7 @@ export class WorkflowRuntime {
 			pluginTools: this.options.getPluginTools?.() ?? [],
 			webTools: webToolsEnabled(),
 			sshTools: sshToolAvailable(),
+			semanticSearch: semanticSearchEnabled(),
 			...this.shellContext(),
 			modelId: this.session?.model
 				? this.session.model.provider + "/" + this.session.model.id
@@ -648,6 +650,7 @@ export class WorkflowRuntime {
 			fastContext: helperOptions?.fastContext,
 			// Fast Context explores this workspace; the web is no part of that.
 			webTools: !helperOptions?.fastContext && webToolsEnabled(),
+			semanticSearch: semanticSearchEnabled(),
 			modelId: helperModel.provider + "/" + helperModel.id,
 			...this.shellContext(),
 		};
@@ -668,14 +671,15 @@ export class WorkflowRuntime {
 			resourceLoader,
 			tools: toolsForMode(context).filter((name) =>
 				(helperOptions?.fastContext
-					? ["read", "grep", AST_GREP_TOOL_NAME, "find", "ls", STAT_TOOL_NAME]
-					: ["read", "grep", AST_GREP_TOOL_NAME, "find", "ls", STAT_TOOL_NAME, ...WEB_TOOL_NAMES, GITHUB_TOOL_NAME, "edit", AST_EDIT_TOOL_NAME, "write"]
+					? ["read", "grep", AST_GREP_TOOL_NAME, SEMANTIC_SEARCH_TOOL_NAME, "find", "ls", STAT_TOOL_NAME]
+					: ["read", "grep", AST_GREP_TOOL_NAME, SEMANTIC_SEARCH_TOOL_NAME, "find", "ls", STAT_TOOL_NAME, ...WEB_TOOL_NAMES, GITHUB_TOOL_NAME, "edit", AST_EDIT_TOOL_NAME, "write"]
 				).includes(name) || (!helperOptions?.fastContext && allowWorkerShell && isShellTool(name)),
 			),
 			customTools: [
 				createReadTool(piModule, this.options.cwd),
 				createStatTool(this.options.cwd),
 				createAstGrepTool(this.options.cwd),
+				createSemanticSearchTool(this.options.cwd),
 				...(helperOptions?.fastContext
 					? []
 					: [
@@ -980,6 +984,7 @@ export async function createWorkflowSession(options: WorkflowSessionOptions) {
 				createStatTool(options.cwd),
 				...createWebTools(),
 				createAstGrepTool(options.cwd),
+				createSemanticSearchTool(options.cwd),
 				createAstEditTool(options.cwd, { assertWritable: (path) => workflow.assertParentWrite(path) }),
 				createGithubTool(options.cwd),
 				createSshTool(options.cwd, { assertWritable: (path) => workflow.assertParentWrite(path) }),

@@ -1,4 +1,5 @@
 import type { FusionConfig } from "../../shared/fusion";
+import type { CodeIntelModels, CodeIntelStatus, CodeIntelUpdate, CompletionRequest, CompletionResponse, IndexStatus } from "../../shared/code-intel";
 import type { LanStatus } from "../../shared/lan";
 import type { SshHostInput, SshStatus, SshTestResult } from "../../shared/ssh";
 import type {
@@ -81,6 +82,7 @@ import type {
 	SaveModelProfileRequest,
 } from "../../shared/settings";
 import type { WebToolsStatus, WebToolsUpdate } from "../../shared/web-tools";
+import type { PromptsSnapshot, SavePromptRequest } from "../../shared/prompts";
 import type {
 	TerminalCreateRequest,
 	TerminalExit,
@@ -406,6 +408,27 @@ export interface AgentApi {
 	proxySave(manual: string | null): Promise<ProxyStatus>;
 	webToolsStatus(): Promise<WebToolsStatus>;
 	webToolsSave(patch: WebToolsUpdate): Promise<WebToolsStatus>;
+	/** Code index and Tab completion settings; keys are reported as set or not, never sent. */
+	codeIntelStatus(): Promise<CodeIntelStatus>;
+	codeIntelSave(patch: CodeIntelUpdate): Promise<CodeIntelStatus>;
+	/** A project's index; asking starts indexing it if it is not already. */
+	codeIndexStatus(cwd: string): Promise<IndexStatus>;
+	/** Models from Providers and models that the index and Tab completion can use. */
+	codeIntelModels(): Promise<CodeIntelModels>;
+	/** Forget the project's vectors and index it from scratch. */
+	codeIndexRebuild(cwd: string): Promise<IndexStatus>;
+	onCodeIndexChanged(listener: (status: IndexStatus) => void): () => void;
+	/** One inline suggestion at the cursor; empty text for none. */
+	tabComplete(request: CompletionRequest): Promise<CompletionResponse>;
+	tabCompleteCancel(id: string): Promise<void>;
+	/** The user's own system prompts and which is in use; the default prompt's text is never sent. */
+	promptsList(): Promise<PromptsSnapshot>;
+	/** Adds (no `id`) or edits a prompt. Open sessions pick changes up on their next call. */
+	promptsSave(request: SavePromptRequest): Promise<PromptsSnapshot>;
+	/** Removing the prompt in use goes back to the default one. */
+	promptsRemove(id: string): Promise<PromptsSnapshot>;
+	/** `null` is the default prompt. */
+	promptsSetActive(id: string | null): Promise<PromptsSnapshot>;
 	/** A data URL for a site's icon, fetched by main; null when there is none. */
 	webFavicon(url: string): Promise<string | null>;
 

@@ -24,6 +24,7 @@ interface User32 {
 	IsWindow(hwnd: number): boolean;
 	IsIconic(hwnd: number): boolean;
 	ShowWindow(hwnd: number, command: number): boolean;
+	GetClassNameW(hwnd: number, buffer: Buffer, max: number): number;
 }
 
 let user32: User32 | null = null;
@@ -40,6 +41,7 @@ function load(): User32 {
 		IsWindow: lib.func("bool __stdcall IsWindow(intptr hWnd)"),
 		IsIconic: lib.func("bool __stdcall IsIconic(intptr hWnd)"),
 		ShowWindow: lib.func("bool __stdcall ShowWindow(intptr hWnd, int cmd)"),
+		GetClassNameW: lib.func("int __stdcall GetClassNameW(intptr hWnd, _Out_ uint16_t *buffer, int max)"),
 	};
 	return user32;
 }
@@ -58,6 +60,18 @@ export function raiseWindow(args: Record<string, unknown>): ComputerCallResult {
 	if (raised && !released) return failed(`Window ${hwnd} was raised but could not be returned to normal stacking.`);
 	if (!raised) return failed(`Window ${hwnd} could not be raised.`);
 	return { text: `Raised window ${hwnd}.`, images: [], isError: false };
+}
+
+/** A window's class name, e.g. `WindowsForms10.Window.8.app.0…` or `Chrome_WidgetWin_1`. */
+export function windowClass(args: Record<string, unknown>): ComputerCallResult {
+	const hwnd = args.window_id;
+	if (process.platform !== "win32") return failed("Window classes are only available on Windows.");
+	if (typeof hwnd !== "number" || !Number.isSafeInteger(hwnd) || hwnd <= 0) return failed("window_id is required.");
+	const api = load();
+	if (!api.IsWindow(hwnd)) return failed(`Window ${hwnd} no longer exists.`);
+	const buffer = Buffer.alloc(512);
+	const length = api.GetClassNameW(hwnd, buffer, 256);
+	return { text: buffer.toString("utf16le", 0, Math.max(0, length) * 2), images: [], isError: length <= 0 };
 }
 
 function failed(text: string): ComputerCallResult {

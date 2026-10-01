@@ -5,6 +5,7 @@ import { createPromptResources } from "../workflow-runtime";
 import { createStatTool } from "../file-tools";
 import { createWebTools, webToolsEnabled } from "../web-tools";
 import { createAstEditTool, createAstGrepTool } from "../ast-tools";
+import { createSemanticSearchTool, semanticSearchEnabled } from "../semantic-search-tool";
 import { createGithubTool } from "../github-tool";
 import { currentCommandShell } from "../command-shell";
 import { COMPACTION_INSTRUCTIONS, toolsForMode, type PromptContext } from "../prompt-library";
@@ -55,6 +56,7 @@ export class AutomationRunner {
 			permission: automation.mode,
 			headless: true,
 			webTools: webToolsEnabled(),
+			semanticSearch: semanticSearchEnabled(),
 			...(shell.id === "auto" ? {} : { shellTools: shell.shellTools, shellNote: shell.promptNote }),
 			// Read, not written: an unattended run follows what the user has asked
 			// to be remembered, but has no one to confirm anything new with.
@@ -71,6 +73,7 @@ export class AutomationRunner {
 				createStatTool(automation.cwd),
 				...createWebTools(),
 				createAstGrepTool(automation.cwd),
+				createSemanticSearchTool(automation.cwd),
 				createAstEditTool(automation.cwd),
 				createGithubTool(automation.cwd),
 				...shell.customTools(automation.cwd, createBashToolDefinition),
