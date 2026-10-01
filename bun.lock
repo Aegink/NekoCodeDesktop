@@ -24,9 +24,9 @@
         "@capacitor/core": "8.5.2",
         "@capacitor/ios": "8.5.2",
         "@capacitor/preferences": "8",
-        "@earendil-works/pi-agent-core": "workspace:0.87.1",
-        "@earendil-works/pi-ai": "workspace:0.87.1",
-        "@earendil-works/pi-coding-agent": "workspace:0.87.1",
+        "@earendil-works/pi-agent-core": "workspace:0.99.1",
+        "@earendil-works/pi-ai": "workspace:0.99.1",
+        "@earendil-works/pi-coding-agent": "workspace:0.99.1",
         "@tabler/icons-react": "^3.44.0",
         "@tencent-connect/qqbot-nodejs": "^1.0.4",
         "@trycua/cua-driver": "0.28.2",
@@ -76,11 +76,11 @@
     },
     "pi/packages/agent": {
       "name": "@earendil-works/pi-agent-core",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
-        "@earendil-works/pi-ai": "^0.87.1",
-        "@earendil-works/pi-telemetry": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/pi-ai": "^0.99.1",
+        "@earendil-works/pi-telemetry": "^0.99.1",
         "diff": "8.0.4",
         "ignore": "7.0.8",
         "typebox": "1.3.27",
@@ -88,20 +88,20 @@
       },
       "devDependencies": {
         "@types/node": "22.19.19",
-        "@vitest/coverage-v8": "4.1.9",
-        "vitest": "4.1.9",
+        "@vitest/coverage-v8": "4.1.11",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/ai": {
       "name": "@earendil-works/pi-ai",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "bin": {
         "pi-ai": "dist/cli.js",
       },
       "dependencies": {
         "@anthropic-ai/sdk": "0.124.0",
         "@aws-sdk/client-bedrock-runtime": "3.1127.0",
-        "@earendil-works/pi-telemetry": "^0.87.1",
+        "@earendil-works/pi-telemetry": "^0.99.1",
         "@google/genai": "2.21.0",
         "@smithy/node-http-handler": "4.12.1",
         "@smithy/types": "4.18.0",
@@ -114,43 +114,56 @@
       "devDependencies": {
         "@types/node": "22.19.19",
         "canvas": "3.2.3",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/chord": {
       "name": "@earendil-works/chord",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
         "esbuild": "0.28.2",
       },
       "devDependencies": {
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/client": {
       "name": "@earendil-works/pi-client",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
-        "@earendil-works/pi-protocol": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/pi-protocol": "^0.99.1",
       },
       "devDependencies": {
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
+      },
+    },
+    "pi/packages/codemode": {
+      "name": "@earendil-works/pi-codemode",
+      "version": "0.99.1",
+      "dependencies": {
+        "quickjs-wasi": "3.6.2",
+      },
+      "devDependencies": {
+        "shx": "0.4.0",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/coding-agent": {
       "name": "@earendil-works/pi-coding-agent",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "bin": {
         "pi": "dist/bundle/cli.js",
       },
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
-        "@earendil-works/pi-agent-core": "^0.87.1",
-        "@earendil-works/pi-ai": "^0.87.1",
-        "@earendil-works/pi-tui": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/pi-agent-core": "^0.99.1",
+        "@earendil-works/pi-ai": "^0.99.1",
+        "@earendil-works/pi-codemode": "^0.99.1",
+        "@earendil-works/pi-mcp": "^0.99.1",
+        "@earendil-works/pi-tui": "^0.99.1",
         "@silvia-odwyer/photon-node": "0.3.4",
         "chalk": "6.0.0",
         "cross-spawn": "7.0.6",
@@ -162,15 +175,16 @@
         "jiti": "2.7.0",
         "minimatch": "10.2.6",
         "proper-lockfile": "4.1.2",
+        "quickjs-wasi": "3.6.2",
         "semver": "7.8.5",
         "typebox": "1.3.27",
         "undici": "8.10.2",
         "yaml": "2.9.0",
       },
       "devDependencies": {
-        "@earendil-works/pi-client": "^0.87.1",
-        "@earendil-works/pi-protocol": "^0.87.1",
-        "@earendil-works/pi-server": "^0.87.1",
+        "@earendil-works/pi-client": "^0.99.1",
+        "@earendil-works/pi-protocol": "^0.99.1",
+        "@earendil-works/pi-server": "^0.99.1",
         "@types/cross-spawn": "6.0.6",
         "@types/hosted-git-info": "3.0.5",
         "@types/node": "22.19.19",
@@ -178,83 +192,95 @@
         "@types/semver": "7.7.1",
         "marked": "18.0.11",
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/durable": {
       "name": "@earendil-works/pi-durable",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
-        "@earendil-works/pi-ai": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/pi-ai": "^0.99.1",
       },
       "devDependencies": {
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/evals": {
       "name": "@earendil-works/pi-evals",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "devDependencies": {
-        "@earendil-works/pi-ai": "^0.87.1",
-        "@earendil-works/pi-coding-agent": "^0.87.1",
+        "@earendil-works/pi-ai": "^0.99.1",
+        "@earendil-works/pi-coding-agent": "^0.99.1",
         "@types/node": "22.19.19",
         "@vitest-evals/core": "0.15.0",
         "autoevals": "0.3.0",
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
         "vitest-evals": "0.15.0",
+      },
+    },
+    "pi/packages/mcp": {
+      "name": "@earendil-works/pi-mcp",
+      "version": "0.99.1",
+      "dependencies": {
+        "cross-spawn": "7.0.6",
+      },
+      "devDependencies": {
+        "@types/cross-spawn": "6.0.6",
+        "shx": "0.4.0",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/protocol": {
       "name": "@earendil-works/pi-protocol",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
         "typebox": "1.3.27",
       },
       "devDependencies": {
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/server": {
       "name": "@earendil-works/pi-server",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/chord": "^0.87.1",
-        "@earendil-works/pi-agent-core": "^0.87.1",
-        "@earendil-works/pi-protocol": "^0.87.1",
+        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/pi-agent-core": "^0.99.1",
+        "@earendil-works/pi-protocol": "^0.99.1",
       },
       "devDependencies": {
         "shx": "0.4.0",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/session-backends/sqlite-node": {
       "name": "@earendil-works/pi-session-backend-sqlite-node",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
-        "@earendil-works/pi-agent-core": "^0.87.1",
-        "@earendil-works/pi-ai": "^0.87.1",
+        "@earendil-works/pi-agent-core": "^0.99.1",
+        "@earendil-works/pi-ai": "^0.99.1",
       },
       "devDependencies": {
-        "@vitest/coverage-v8": "4.1.9",
-        "vitest": "4.1.9",
+        "@vitest/coverage-v8": "4.1.11",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/telemetry": {
       "name": "@earendil-works/pi-telemetry",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "devDependencies": {
         "@types/node": "22.19.19",
-        "vitest": "4.1.9",
+        "vitest": "4.1.11",
       },
     },
     "pi/packages/tui": {
       "name": "@earendil-works/pi-tui",
-      "version": "0.87.1",
+      "version": "0.99.1",
       "dependencies": {
         "get-east-asian-width": "1.6.0",
         "marked": "18.0.11",
@@ -443,11 +469,15 @@
 
     "@earendil-works/pi-client": ["@earendil-works/pi-client@workspace:pi/packages/client"],
 
+    "@earendil-works/pi-codemode": ["@earendil-works/pi-codemode@workspace:pi/packages/codemode"],
+
     "@earendil-works/pi-coding-agent": ["@earendil-works/pi-coding-agent@workspace:pi/packages/coding-agent"],
 
     "@earendil-works/pi-durable": ["@earendil-works/pi-durable@workspace:pi/packages/durable"],
 
     "@earendil-works/pi-evals": ["@earendil-works/pi-evals@workspace:pi/packages/evals"],
+
+    "@earendil-works/pi-mcp": ["@earendil-works/pi-mcp@workspace:pi/packages/mcp"],
 
     "@earendil-works/pi-protocol": ["@earendil-works/pi-protocol@workspace:pi/packages/protocol"],
 
@@ -919,21 +949,21 @@
 
     "@vitest-evals/report-ui": ["@vitest-evals/report-ui@0.15.0", "https://registry.npmmirror.com/@vitest-evals/report-ui/-/report-ui-0.15.0.tgz", { "dependencies": { "@vitest-evals/core": "0.15.0" } }, "sha512-icrutiRhZ2T1MrHo2RW09hcEwfi/tV/FgsGAE76Wd0C02tZyCleQRjt11RWhBJiYDPpsjjjTHGCHIO6tmtX5zQ=="],
 
-    "@vitest/coverage-v8": ["@vitest/coverage-v8@4.1.9", "https://registry.npmmirror.com/@vitest/coverage-v8/-/coverage-v8-4.1.9.tgz", { "dependencies": { "@bcoe/v8-coverage": "^1.0.2", "@vitest/utils": "4.1.9", "ast-v8-to-istanbul": "^1.0.0", "istanbul-lib-coverage": "^3.2.2", "istanbul-lib-report": "^3.0.1", "istanbul-reports": "^3.2.0", "magicast": "^0.5.2", "obug": "^2.1.1", "std-env": "^4.0.0-rc.1", "tinyrainbow": "^3.1.0" }, "peerDependencies": { "@vitest/browser": "4.1.9", "vitest": "4.1.9" }, "optionalPeers": ["@vitest/browser"] }, "sha512-G9/lgqibheLVBDRuya45EbsEXTYcWoSG+TLg7i2axuzx0Eq62eXn+aWXyaVdV5vKvFSWd6ywcX8hA7la9Pvu8g=="],
+    "@vitest/coverage-v8": ["@vitest/coverage-v8@4.1.11", "", { "dependencies": { "@bcoe/v8-coverage": "^1.0.2", "@vitest/utils": "4.1.11", "ast-v8-to-istanbul": "^1.0.0", "istanbul-lib-coverage": "^3.2.2", "istanbul-lib-report": "^3.0.1", "istanbul-reports": "^3.2.0", "magicast": "^0.5.2", "obug": "^2.1.1", "std-env": "^4.0.0-rc.1", "tinyrainbow": "^3.1.0" }, "peerDependencies": { "@vitest/browser": "4.1.11", "vitest": "4.1.11" }, "optionalPeers": ["@vitest/browser"] }, "sha512-8MVGEFnJIcdGjcbfKmeq8z0pZHH0JlVtoVZH9Q/qwUp6wyFnEJUBMrw9DCaj+ra3vShGmhavjalMIhPNxZAUcw=="],
 
-    "@vitest/expect": ["@vitest/expect@4.1.9", "https://registry.npmmirror.com/@vitest/expect/-/expect-4.1.9.tgz", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@types/chai": "^5.2.2", "@vitest/spy": "4.1.9", "@vitest/utils": "4.1.9", "chai": "^6.2.2", "tinyrainbow": "^3.1.0" } }, "sha512-vl/rYsUKcBr3SnQn166+XR5ZQcgMx3DQhFWdfli/cWpLnLUmbxZvyrJZotLFUryib+LtArYMSTJ5RbQ57ZqrlA=="],
+    "@vitest/expect": ["@vitest/expect@4.1.11", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@types/chai": "^5.2.2", "@vitest/spy": "4.1.11", "@vitest/utils": "4.1.11", "chai": "^6.2.2", "tinyrainbow": "^3.1.0" } }, "sha512-VX2x5vNJXET47KAFzwERI+KRMtTTCSWTfSMKsW7JsUsXV4psq++e3DvZpuTDOpHcxytiDs6p2nhVb2tVDiiUYw=="],
 
-    "@vitest/mocker": ["@vitest/mocker@4.1.9", "https://registry.npmmirror.com/@vitest/mocker/-/mocker-4.1.9.tgz", { "dependencies": { "@vitest/spy": "4.1.9", "estree-walker": "^3.0.3", "magic-string": "^0.30.21" }, "peerDependencies": { "msw": "^2.4.9", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0" }, "optionalPeers": ["msw", "vite"] }, "sha512-EVkXzBjrPGM+cK8/ANWgBrkUCfJfb38/EfTSO8h7pWvKkyPkpWxvR7BkD2MyItMF62C97zAEoqdpUixwR/e+Rw=="],
+    "@vitest/mocker": ["@vitest/mocker@4.1.11", "", { "dependencies": { "@vitest/spy": "4.1.11", "estree-walker": "^3.0.3", "magic-string": "^0.30.21" }, "peerDependencies": { "msw": "^2.4.9", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0" }, "optionalPeers": ["msw", "vite"] }, "sha512-2XJVD55d1o5AZous5CCGKS74g/riOj9odEt2bQpCVZeblHyHdnMeFl4jl0XjU21stf4mbjUkew2eXQZt65g5CQ=="],
 
-    "@vitest/pretty-format": ["@vitest/pretty-format@4.1.9", "https://registry.npmmirror.com/@vitest/pretty-format/-/pretty-format-4.1.9.tgz", { "dependencies": { "tinyrainbow": "^3.1.0" } }, "sha512-s0iufns3iIFitdgm+YR7g1whCAaGtXz459VS9/PqyKDEEFgYIhsHOQmXgIgDuYCt7DeQmiZT0Qe2OA2p4ZPu5A=="],
+    "@vitest/pretty-format": ["@vitest/pretty-format@4.1.11", "", { "dependencies": { "tinyrainbow": "^3.1.0" } }, "sha512-yiZzPbGTS9Sr/JpFl8zHrcIkAofNbFV6k21vIgQN/cY/oxZeXhJv5sc/MBJ5jFKWmWs+oJHw0UXLZjmf931+Vw=="],
 
-    "@vitest/runner": ["@vitest/runner@4.1.9", "https://registry.npmmirror.com/@vitest/runner/-/runner-4.1.9.tgz", { "dependencies": { "@vitest/utils": "4.1.9", "pathe": "^2.0.3" } }, "sha512-KXLMDtc7oe70+3mJfGrPUWPesswH+3sTxAMAMl8DG7I8IUQT4XW718dY5ID3vPUcmlu27CcKfY4P3h3I29SLJg=="],
+    "@vitest/runner": ["@vitest/runner@4.1.11", "", { "dependencies": { "@vitest/utils": "4.1.11", "pathe": "^2.0.3" } }, "sha512-LztvUgdwMNJMIkj3hQnnxiC2Xy1zNxq928W/xhjCLaNCzqTZOudjwbQf6v9IntZGPw132i2Lq2rgTRZHD3JHNw=="],
 
-    "@vitest/snapshot": ["@vitest/snapshot@4.1.9", "https://registry.npmmirror.com/@vitest/snapshot/-/snapshot-4.1.9.tgz", { "dependencies": { "@vitest/pretty-format": "4.1.9", "@vitest/utils": "4.1.9", "magic-string": "^0.30.21", "pathe": "^2.0.3" } }, "sha512-Jc7RKGNBo8Z28WYIm0Niej4xdSPByRf6mU58VpHQkd6Zh05rlnA+twjbK5HyeIGHxrzsc3mJgS43uM0CZKzaIA=="],
+    "@vitest/snapshot": ["@vitest/snapshot@4.1.11", "", { "dependencies": { "@vitest/pretty-format": "4.1.11", "@vitest/utils": "4.1.11", "magic-string": "^0.30.21", "pathe": "^2.0.3" } }, "sha512-pN7ikn1ON7h8ee4gIAp4AzyK+zBtJPzVbqOgu5LCEh4VaJVbPQcgYQYJIMGQPXVeJJq1fnfazis7a5pFNPahog=="],
 
-    "@vitest/spy": ["@vitest/spy@4.1.9", "https://registry.npmmirror.com/@vitest/spy/-/spy-4.1.9.tgz", {}, "sha512-fHpsS6mIi+PiEW+vcRVOMkX1oSaPKne3VOclSFICPcGOmfKgXPU5iAah+wcNcj2xPrCCmfq99IDGf+EojhhvhA=="],
+    "@vitest/spy": ["@vitest/spy@4.1.11", "", {}, "sha512-apNa/prQy2qCeywhnixOHPRCgGNhvg7T4Dapfl1GahLp/R+uhBm5cPyFoNVyqsNd2h1nJxL6BqqdIjiABL60YA=="],
 
-    "@vitest/utils": ["@vitest/utils@4.1.9", "https://registry.npmmirror.com/@vitest/utils/-/utils-4.1.9.tgz", { "dependencies": { "@vitest/pretty-format": "4.1.9", "convert-source-map": "^2.0.0", "tinyrainbow": "^3.1.0" } }, "sha512-A51o8ymO5PpqlWNnBP9ZHPXDIpuMtTLlGSjN7la4US+LJzoUMyhwjA5QXlm39JexgwHKW4Xjs8Z2d3dLCXOeuA=="],
+    "@vitest/utils": ["@vitest/utils@4.1.11", "", { "dependencies": { "@vitest/pretty-format": "4.1.11", "convert-source-map": "^2.0.0", "tinyrainbow": "^3.1.0" } }, "sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ=="],
 
     "@xmldom/xmldom": ["@xmldom/xmldom@0.8.15", "", {}, "sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA=="],
 
@@ -1839,6 +1869,8 @@
 
     "quick-lru": ["quick-lru@5.1.1", "", {}, "sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA=="],
 
+    "quickjs-wasi": ["quickjs-wasi@3.6.2", "", {}, "sha512-FCqGtGOrMgzUiIrMNMA2YnsOxCNwo31dzqXvclXUC6xeT35NJLKXQJsvbeCTjvoFAwZgEAPg8U6+KAPDGXn8Mg=="],
+
     "range-parser": ["range-parser@1.3.0", "", {}, "sha512-hek2mFQpPuI4E1BBKrSto+BU3e3x4xuarsbiwr3+lf7p44juvFMV0XFWQAP3xUyqXA4RrXLIoaSUGbSt056ZMw=="],
 
     "raw-body": ["raw-body@3.0.2", "", { "dependencies": { "bytes": "~3.1.2", "http-errors": "~2.0.1", "iconv-lite": "~0.7.0", "unpipe": "~1.0.0" } }, "sha512-K5zQjDllxWkf7Z5xJdV0/B0WTNqx6vxG70zJE4N0kBs4LovmEYWJzQGxC9bS9RAKu3bgM40lrd5zoLJ12MQ5BA=="],
@@ -2117,7 +2149,7 @@
 
     "vite": ["vite@8.3.0", "https://registry.npmmirror.com/vite/-/vite-8.3.0.tgz", { "dependencies": { "lightningcss": "^1.33.0", "picomatch": "^4.0.7", "postcss": "^8.5.28", "rolldown": "~1.2.6", "tinyglobby": "^0.2.17" }, "optionalDependencies": { "fsevents": "~2.3.3" }, "peerDependencies": { "@types/node": "^20.19.0 || >=22.12.0", "@vitejs/devtools": "^0.7.1", "esbuild": "^0.27.0 || ^0.28.0", "jiti": ">=1.21.0", "less": "^4.0.0", "sass": "^1.70.0", "sass-embedded": "^1.70.0", "stylus": ">=0.54.8", "sugarss": "^5.0.0", "terser": "^5.16.0", "tsx": "^4.8.1", "yaml": "^2.4.2" }, "optionalPeers": ["@types/node", "@vitejs/devtools", "esbuild", "jiti", "less", "sass", "sass-embedded", "stylus", "sugarss", "terser", "tsx", "yaml"], "bin": { "vite": "bin/vite.js" } }, "sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ=="],
 
-    "vitest": ["vitest@4.1.9", "https://registry.npmmirror.com/vitest/-/vitest-4.1.9.tgz", { "dependencies": { "@vitest/expect": "4.1.9", "@vitest/mocker": "4.1.9", "@vitest/pretty-format": "4.1.9", "@vitest/runner": "4.1.9", "@vitest/snapshot": "4.1.9", "@vitest/spy": "4.1.9", "@vitest/utils": "4.1.9", "es-module-lexer": "^2.0.0", "expect-type": "^1.3.0", "magic-string": "^0.30.21", "obug": "^2.1.1", "pathe": "^2.0.3", "picomatch": "^4.0.3", "std-env": "^4.0.0-rc.1", "tinybench": "^2.9.0", "tinyexec": "^1.0.2", "tinyglobby": "^0.2.15", "tinyrainbow": "^3.1.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0", "why-is-node-running": "^2.3.0" }, "peerDependencies": { "@edge-runtime/vm": "*", "@opentelemetry/api": "^1.9.0", "@types/node": "^20.0.0 || ^22.0.0 || >=24.0.0", "@vitest/browser-playwright": "4.1.9", "@vitest/browser-preview": "4.1.9", "@vitest/browser-webdriverio": "4.1.9", "@vitest/coverage-istanbul": "4.1.9", "@vitest/coverage-v8": "4.1.9", "@vitest/ui": "4.1.9", "happy-dom": "*", "jsdom": "*" }, "optionalPeers": ["@edge-runtime/vm", "@opentelemetry/api", "@types/node", "@vitest/browser-playwright", "@vitest/browser-preview", "@vitest/browser-webdriverio", "@vitest/coverage-istanbul", "@vitest/coverage-v8", "@vitest/ui", "happy-dom", "jsdom"], "bin": { "vitest": "./vitest.mjs" } }, "sha512-nE3/LEyc0z87uHYLZebqCUOaJr2hdtuPp7BQ4BosVFnfltxgAvMG08NyrSGlPpOUWvR27c5flSmYFTNr78L9GQ=="],
+    "vitest": ["vitest@4.1.11", "", { "dependencies": { "@vitest/expect": "4.1.11", "@vitest/mocker": "4.1.11", "@vitest/pretty-format": "4.1.11", "@vitest/runner": "4.1.11", "@vitest/snapshot": "4.1.11", "@vitest/spy": "4.1.11", "@vitest/utils": "4.1.11", "es-module-lexer": "^2.0.0", "expect-type": "^1.3.0", "magic-string": "^0.30.21", "obug": "^2.1.1", "pathe": "^2.0.3", "picomatch": "^4.0.3", "std-env": "^4.0.0-rc.1", "tinybench": "^2.9.0", "tinyexec": "^1.0.2", "tinyglobby": "^0.2.15", "tinyrainbow": "^3.1.0", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0", "why-is-node-running": "^2.3.0" }, "peerDependencies": { "@edge-runtime/vm": "*", "@opentelemetry/api": "^1.9.0", "@types/node": "^20.0.0 || ^22.0.0 || >=24.0.0", "@vitest/browser-playwright": "4.1.11", "@vitest/browser-preview": "4.1.11", "@vitest/browser-webdriverio": "4.1.11", "@vitest/coverage-istanbul": "4.1.11", "@vitest/coverage-v8": "4.1.11", "@vitest/ui": "4.1.11", "happy-dom": "*", "jsdom": "*" }, "optionalPeers": ["@edge-runtime/vm", "@opentelemetry/api", "@types/node", "@vitest/browser-playwright", "@vitest/browser-preview", "@vitest/browser-webdriverio", "@vitest/coverage-istanbul", "@vitest/coverage-v8", "@vitest/ui", "happy-dom", "jsdom"], "bin": { "vitest": "./vitest.mjs" } }, "sha512-fhACrNXUidIbGSBr5FlbuBkO7VWC1ZyLl0DO4CU2DrQoAPxX84Ysxs+HeGQpii5lZWV1Q4gBZTTu49mF+A6Edw=="],
 
     "vitest-evals": ["vitest-evals@0.15.0", "https://registry.npmmirror.com/vitest-evals/-/vitest-evals-0.15.0.tgz", { "dependencies": { "@vitest-evals/core": "0.15.0", "@vitest-evals/report-ui": "0.15.0" }, "peerDependencies": { "ai": ">=4 <7", "tinyrainbow": ">=2 <4", "vitest": ">=4 <5", "zod": ">=3 <5" }, "optionalPeers": ["ai", "zod"], "bin": { "vitest-evals": "bin/vitest-evals.js" } }, "sha512-bOYALQdLXKYFRCV8aQ+yLeH7XkmYsTxUWQxLHzJdIEcIBx2v/kPgG3Zg6m231jMCphuoM6xH4YQB3+0pDP7LLw=="],
 

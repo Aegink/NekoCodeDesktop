@@ -322,6 +322,8 @@ const api = {
 	mcpSave: (req: SaveMcpServerRequest): Promise<McpSnapshot> => ipcRenderer.invoke("mcp:save", req),
 	mcpRemove: (id: string): Promise<McpSnapshot> => ipcRenderer.invoke("mcp:remove", id),
 	mcpReconnect: (id: string): Promise<McpSnapshot> => ipcRenderer.invoke("mcp:reconnect", id),
+	mcpSignIn: (id: string): Promise<McpSnapshot> => ipcRenderer.invoke("mcp:signIn", id),
+	mcpSignOut: (id: string): Promise<McpSnapshot> => ipcRenderer.invoke("mcp:signOut", id),
 	/** Connection states move on their own — a server can drop at any time. */
 	onMcpChanged: (listener: (snapshot: McpSnapshot) => void) => subscribe("mcp:changed", listener),
 	acpState: (): Promise<AcpState> => ipcRenderer.invoke("acp:state"),

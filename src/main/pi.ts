@@ -28,3 +28,21 @@ export function piAi(): Promise<PiAiModule> {
 	piAiModulePromise ??= import("@earendil-works/pi-ai");
 	return piAiModulePromise;
 }
+
+export type PiMcpModule = typeof import("@earendil-works/pi-mcp");
+export type PiMcpOAuthModule = typeof import("@earendil-works/pi-mcp/oauth");
+
+let piMcpModulePromise: Promise<PiMcpModule> | null = null;
+let piMcpOAuthModulePromise: Promise<PiMcpOAuthModule> | null = null;
+
+/** Load the MCP client on first use; ESM-only like the rest of pi. */
+export function piMcp(): Promise<PiMcpModule> {
+	piMcpModulePromise ??= import("@earendil-works/pi-mcp");
+	return piMcpModulePromise;
+}
+
+/** MCP's OAuth half, a separate entry point: only servers that sign in need it. */
+export function piMcpOAuth(): Promise<PiMcpOAuthModule> {
+	piMcpOAuthModulePromise ??= import("@earendil-works/pi-mcp/oauth");
+	return piMcpOAuthModulePromise;
+}

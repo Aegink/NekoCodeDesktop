@@ -4,6 +4,7 @@ import { AppPreferencesStore } from "./app-preferences";
 import { ModelPricingService } from "./model-pricing";
 import { WorktreeService, type PreparedWorkspace } from "./worktree-service";
 import { McpService } from "./mcp/service";
+import { McpAuthStore } from "./mcp/oauth";
 import { AcpService } from "./acp/service";
 import { AcpConfigStore } from "./acp/config-store";
 import type { AcpToolServers } from "./acp/session";
@@ -770,6 +771,11 @@ function createWindow(): void {
 		app.getPath("userData"),
 		() => taskManager?.active.getSnapshot()?.session.cwd ?? app.getPath("home"),
 		() => { if (!win.isDestroyed()) win.webContents.send("mcp:changed", mcpService?.snapshot()); },
+		{
+			version: app.getVersion(),
+			auth: new McpAuthStore(app.getPath("userData"), safeStorage),
+			openUrl: (url) => shell.openExternal(url),
+		},
 	);
 	if (!contextBroadcasts) {
 		contextBroadcasts = true;
@@ -1239,6 +1245,14 @@ function registerIpc(): void {
 	ipcMain.handle("mcp:reconnect", (_e, id: string): Promise<McpSnapshot> => {
 		if (!mcpService) throw new Error("MCP service unavailable");
 		return mcpService.reconnect(id);
+	});
+	ipcMain.handle("mcp:signIn", (_e, id: string): Promise<McpSnapshot> => {
+		if (!mcpService) throw new Error("MCP service unavailable");
+		return mcpService.signIn(id);
+	});
+	ipcMain.handle("mcp:signOut", (_e, id: string): Promise<McpSnapshot> => {
+		if (!mcpService) throw new Error("MCP service unavailable");
+		return mcpService.signOut(id);
 	});
 
 	const acp = (): AcpService =>

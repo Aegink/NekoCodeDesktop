@@ -186,11 +186,16 @@ export const en = {
 	"mcp.state.disabled": "off",
 	"mcp.state.error": "failed",
 	"mcp.state.ready": "ready",
+	"mcp.state.needs-auth": "sign-in required",
+	"mcp.signIn": "Sign in",
+	"mcp.signingIn": "Finish signing in in your browser…",
+	"mcp.signOut": "Sign out",
+	"mcp.signInDesktopOnly": "Sign in from the desktop app",
 	"mcp.namePlaceholder": "Name, e.g. linear",
 	"mcp.commandPlaceholder": "npx -y @modelcontextprotocol/server-filesystem .",
 	"mcp.urlPlaceholder": "https://example.com/mcp",
 	"mcp.envPlaceholder": "Environment, one KEY=value per line",
-	"mcp.headersPlaceholder": "Headers, one Name=value per line",
+	"mcp.headersPlaceholder": "Headers, one Name=value per line. Without Authorization, a server that asks for sign-in uses OAuth",
 	"mcp.footnote":
 		"Tools are offered to the model as mcp__<server>__<tool>. A server that is down contributes nothing rather than tools that fail.",
 	"plugins.intro":

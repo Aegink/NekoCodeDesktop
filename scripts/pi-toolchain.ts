@@ -39,6 +39,8 @@ export function buildSteps(): BuildStep[] {
 		{ pkg: "chord", script: "build" },
 		{ pkg: "tui", script: "build" },
 		{ pkg: "telemetry", script: "build" },
+		{ pkg: "codemode", script: "build" },
+		{ pkg: "mcp", script: "build" },
 		{ pkg: "ai", script: "build:offline" },
 		{ pkg: "durable", script: "build" },
 		{ pkg: "agent", script: "build" },

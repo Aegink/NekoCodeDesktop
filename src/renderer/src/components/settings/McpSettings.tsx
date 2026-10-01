@@ -64,6 +64,7 @@ const STATE_CLASS: Record<McpServerStatus["state"], string> = {
 	ready: "bg-[var(--success,#16a34a)]",
 	connecting: "bg-[var(--warning,#d97706)] animate-pulse",
 	error: "bg-destructive",
+	"needs-auth": "bg-[var(--warning,#d97706)]",
 	disabled: "bg-muted-foreground/40",
 };
 
@@ -80,6 +81,10 @@ export function McpSettings() {
 	const [draft, setDraft] = useState<Draft | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	/** The server whose browser sign-in is open; it can take minutes, so it gets its own note. */
+	const [signingIn, setSigningIn] = useState<string | null>(null);
+	// Sign-in opens a browser on the machine running the app, which a WebUI visitor cannot see.
+	const canSignIn = api.runtime !== "web";
 
 	useEffect(() => {
 		api.mcpList().then(setSnapshot).catch((cause: unknown) => setError(errorMessage(cause)));
@@ -95,7 +100,10 @@ export function McpSettings() {
 				after?.();
 			})
 			.catch((cause: unknown) => setError(errorMessage(cause)))
-			.finally(() => setBusy(false));
+			.finally(() => {
+				setBusy(false);
+				setSigningIn(null);
+			});
 	};
 
 	const servers = snapshot?.servers ?? [];
@@ -129,11 +137,40 @@ export function McpSettings() {
 							<span className="shrink-0 rounded bg-[var(--color-background-elevated-secondary)] px-1.5 py-0.5 font-mono text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">
 								{server.config.transport}
 							</span>
-							<span className="min-w-0 flex-1 truncate text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">
-								{server.state === "ready"
-									? t("mcp.toolCount", { count: server.tools.length })
-									: (server.error ?? t(`mcp.state.${server.state}`))}
+							<span
+								className="min-w-0 flex-1 truncate text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground"
+								title={server.error}
+							>
+								{signingIn === server.config.id
+									? t("mcp.signingIn")
+									: server.state === "ready"
+										? t("mcp.toolCount", { count: server.tools.length })
+										: server.state === "needs-auth"
+											? t(canSignIn ? "mcp.state.needs-auth" : "mcp.signInDesktopOnly")
+											: (server.error ?? t(`mcp.state.${server.state}`))}
 							</span>
+							{server.state === "needs-auth" && canSignIn ? (
+								<Button
+									disabled={busy}
+									onClick={() => {
+										setSigningIn(server.config.id);
+										run(api.mcpSignIn(server.config.id), () => setSigningIn(null));
+									}}
+									size="xs"
+									variant="subtle"
+								>
+									{t("mcp.signIn")}
+								</Button>
+							) : server.signedIn && canSignIn ? (
+								<Button
+									disabled={busy}
+									onClick={() => run(api.mcpSignOut(server.config.id))}
+									size="xs"
+									variant="ghost"
+								>
+									{t("mcp.signOut")}
+								</Button>
+							) : null}
 							<Switch
 								checked={server.config.enabled}
 								disabled={busy}

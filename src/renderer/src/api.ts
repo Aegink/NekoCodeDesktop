@@ -286,6 +286,9 @@ export interface AgentApi {
 	mcpSave(req: SaveMcpServerRequest): Promise<McpSnapshot>;
 	mcpRemove(id: string): Promise<McpSnapshot>;
 	mcpReconnect(id: string): Promise<McpSnapshot>;
+	/** Sign in to a hosted server through the browser (OAuth), then reconnect it. */
+	mcpSignIn(id: string): Promise<McpSnapshot>;
+	mcpSignOut(id: string): Promise<McpSnapshot>;
 	/** Connection states move on their own — a server can drop at any time. */
 	onMcpChanged(listener: (snapshot: McpSnapshot) => void): () => void;
 	/** External ACP agents. Desktop only: the WebUI has no bridge for these. */

@@ -25,7 +25,7 @@ import type {
 	AcpSetConfigRequest,
 	AcpState,
 } from "../../shared/acp";
-import { StdioTransport } from "../mcp/transport";
+import { StdioTransport } from "./stdio-transport";
 import { acpAgentInfo, agentProxyEnv, type AcpAgentDefinition } from "./agents";
 import { authenticateAgent } from "./auth";
 import { resolveAgentBinary, type AgentBinary } from "./binaries";

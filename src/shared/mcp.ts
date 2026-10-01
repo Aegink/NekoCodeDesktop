@@ -31,7 +31,8 @@ export interface McpToolSummary {
 	description: string;
 }
 
-export type McpServerState = "disabled" | "connecting" | "ready" | "error";
+/** `needs-auth`: a hosted server that answered 401 and wants the user to sign in. */
+export type McpServerState = "disabled" | "connecting" | "ready" | "error" | "needs-auth";
 
 export interface McpServerStatus {
 	config: McpServerConfig;
@@ -39,6 +40,11 @@ export interface McpServerStatus {
 	tools: McpToolSummary[];
 	/** Why it is not `ready`. Written for the user, not for a log. */
 	error?: string;
+	/**
+	 * Present for hosted servers that sign in with OAuth — those without an
+	 * `Authorization` header of their own: whether tokens are stored.
+	 */
+	signedIn?: boolean;
 }
 
 export interface McpSnapshot {
