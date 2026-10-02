@@ -3,7 +3,7 @@ import { VscClose, VscDiff } from "react-icons/vsc";
 import { useTranslation } from "../../i18n";
 import { FileTypeIcon } from "../../lib/fileIcons";
 import { cn } from "../../lib/utils";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
 import type { IdeTab, IdeWorkspace } from "./ide-store";
 
 function baseName(relPath: string): string {

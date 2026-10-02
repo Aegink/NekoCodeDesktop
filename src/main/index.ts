@@ -98,6 +98,8 @@ import type {
 } from "../shared/skills";
 import type { AppPreferences, CommandShellOption } from "../shared/preferences";
 import { configureCommandShell, listCommandShells } from "./command-shell";
+import { listSystemFonts } from "./system-fonts";
+import type { SystemFont } from "../shared/font-names";
 import { configureWebTools, createWebTools, webToolsEnabled } from "./web-tools";
 import { codexWebSearch, geminiWebSearch, type CodexSearchAuth } from "./native-search";
 import type { AccountSearchEngineId } from "../shared/web-tools";
@@ -166,8 +168,10 @@ import {
 } from "../shared/files";
 import { resolveUnderRoot } from "./project-paths";
 import {
+	EDIT_COMMANDS,
 	TITLE_BAR_HEIGHT,
 	isWindowMaterial,
+	type EditCommand,
 	type ShellInfo,
 	type WindowMaterial,
 } from "../shared/window";
@@ -1418,6 +1422,13 @@ function registerIpc(): void {
 		return next;
 	});
 	ipcMain.handle("preferences:commandShells", (): CommandShellOption[] => listCommandShells());
+	// Right-click menus in the renderer: run the command on the sender's own
+	// contents, so it acts on whatever field has focus there.
+	ipcMain.handle("edit:command", (event, command: EditCommand) => {
+		if (!(EDIT_COMMANDS as readonly string[]).includes(command)) throw new Error(`Unknown edit command: ${command}`);
+		event.sender[command]();
+	});
+	ipcMain.handle("fonts:list", (_e, refresh?: boolean): Promise<SystemFont[]> => listSystemFonts(refresh === true));
 	ipcMain.handle("agent:abort", () => taskManager?.active.abort());
 	ipcMain.handle("agent:setFusion", (_e, config: FusionConfig) => toWindow(taskManager?.active.setFusion(config)));
 	ipcMain.handle("agent:setModel", (_e, modelKey: string) =>

@@ -49,3 +49,27 @@ export async function fileToPromptImage(file: File): Promise<PromptImageAttachme
 	const bytes = new Uint8Array(await file.arrayBuffer());
 	return { name, mimeType, data: bytesToBase64(bytes) };
 }
+
+/**
+ * The images a paste would attach. Only a clipboard with no text counts: a
+ * screenshot or a copied image file, yes; cells copied from a spreadsheet
+ * (text plus a picture of them), no — those paste as text.
+ */
+export function pastedImageFiles(data: DataTransfer): File[] {
+	if (data.types.includes("text/plain")) return [];
+	return [...data.items]
+		.filter((item) => item.kind === "file")
+		.map((item) => item.getAsFile())
+		.filter((file): file is File => file !== null && imageMimeType(file) !== null);
+}
+
+/** Screenshots all arrive as "image.png"; give each a name worth showing. */
+export function namePastedImages(files: readonly File[], now = new Date()): File[] {
+	const pad = (value: number) => String(value).padStart(2, "0");
+	const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+	return files.map((file, index) => {
+		if (!/^image\.[a-z0-9]+$/i.test(file.name)) return file;
+		const extension = file.name.slice(file.name.lastIndexOf("."));
+		return new File([file], `pasted-${stamp}${index ? `-${index + 1}` : ""}${extension}`, { type: file.type });
+	});
+}

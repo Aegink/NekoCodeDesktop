@@ -10,6 +10,7 @@ import {
 import { VscDiff, VscGoToFile, VscSave, VscSparkle, VscSplitHorizontal, VscWarning } from "react-icons/vsc";
 import { mentionToken } from "../../../../shared/mentions";
 import { errorMessage } from "../../api";
+import { readCodeFontFamily, useAppearancePreferences } from "../../hooks/useAppearancePreferences";
 import { useTranslation } from "../../i18n";
 import { FileTypeIcon } from "../../lib/fileIcons";
 import { ChevronRightIcon } from "../../lib/icons";
@@ -76,15 +77,13 @@ function readWordWrap(): boolean {
 	}
 }
 
-function codeFont(): string {
-	const value = getComputedStyle(document.documentElement).getPropertyValue("--font-chat-code-family").trim();
-	return value || "ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace";
+/** Font options that follow Settings → Appearance; line height scales with the size. */
+function editorFontOptions(fontSize: number, ligatures: boolean): monaco.editor.IEditorOptions {
+	return { fontFamily: readCodeFontFamily(), fontSize, lineHeight: Math.round(fontSize * 1.54), fontLigatures: ligatures };
 }
 
 const EDITOR_OPTIONS: monaco.editor.IStandaloneEditorConstructionOptions = {
 	automaticLayout: true,
-	fontSize: 13,
-	lineHeight: 20,
 	minimap: { enabled: true, renderCharacters: false, maxColumn: 100 },
 	scrollBeyondLastLine: false,
 	smoothScrolling: true,
@@ -153,6 +152,9 @@ export const EditorArea = forwardRef<
 	const handledRevealRef = useRef(0);
 	const decorationsRef = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 	const [wordWrap, setWordWrap] = useState(readWordWrap);
+	const { preferences: appearance } = useAppearancePreferences();
+	const appearanceRef = useRef(appearance);
+	appearanceRef.current = appearance;
 	const [sideBySide, setSideBySide] = useState(true);
 	const [closeQueue, setCloseQueue] = useState<CloseQueue | null>(null);
 	const [inline, setInline] = useState<InlineState | null>(null);
@@ -258,11 +260,11 @@ export const EditorArea = forwardRef<
 		const codeHost = codeHostRef.current;
 		const diffHost = diffHostRef.current;
 		if (!codeHost || !diffHost) return;
-		const fontFamily = codeFont();
-		const editor = monaco.editor.create(codeHost, { ...EDITOR_OPTIONS, fontFamily, model: null, wordWrap: readWordWrap() ? "on" : "off" });
+		const fontOptions = editorFontOptions(appearanceRef.current.editorFontSizePx, appearanceRef.current.codeLigatures);
+		const editor = monaco.editor.create(codeHost, { ...EDITOR_OPTIONS, ...fontOptions, model: null, wordWrap: readWordWrap() ? "on" : "off" });
 		const diff = monaco.editor.createDiffEditor(diffHost, {
 			...EDITOR_OPTIONS,
-			fontFamily,
+			...fontOptions,
 			originalEditable: false,
 			renderSideBySide: true,
 			ignoreTrimWhitespace: false,
@@ -349,6 +351,12 @@ export const EditorArea = forwardRef<
 	useEffect(() => {
 		diffRef.current?.updateOptions({ renderSideBySide: sideBySide });
 	}, [sideBySide]);
+
+	useEffect(() => {
+		const fontOptions = editorFontOptions(appearance.editorFontSizePx, appearance.codeLigatures);
+		editorRef.current?.updateOptions(fontOptions);
+		diffRef.current?.updateOptions(fontOptions);
+	}, [appearance.editorFontSizePx, appearance.codeLigatures, appearance.codeFontFamily]);
 
 	// The theme follows the app's, and is drawn from its tokens.
 	useEffect(() => {

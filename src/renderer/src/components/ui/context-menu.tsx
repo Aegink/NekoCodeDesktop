@@ -97,6 +97,9 @@ export function ContextMenu({ menu, onClose }: { menu: ContextMenuState | null; 
 						role="menuitem"
 						disabled={item.disabled}
 						onMouseEnter={() => setHighlight(index)}
+						// Keep focus (and the selection) where the menu was opened: edit
+						// commands like paste act on the focused field, not on this button.
+						onMouseDown={(event) => event.preventDefault()}
 						onClick={() => {
 							onClose();
 							item.onSelect();

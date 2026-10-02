@@ -12,7 +12,7 @@ import type {
 } from "../shared/remote-desktop";
 import type { AppVersionInfo, UpdateCheckResult } from "../shared/updates";
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { DEFAULT_SHELL_INFO, type ShellInfo, type WindowMaterial } from "../shared/window";
+import { DEFAULT_SHELL_INFO, type EditCommand, type ShellInfo, type WindowMaterial } from "../shared/window";
 import type {
 	InstallPluginRequest,
 	PluginActionRequest,
@@ -78,6 +78,7 @@ import type {
 	SkillsSnapshot,
 } from "../shared/skills";
 import type { AppPreferences, CommandShellOption } from "../shared/preferences";
+import type { SystemFont } from "../shared/font-names";
 import type {
 	WorktreeMergeRequest,
 	WorktreeMergeResult,
@@ -310,6 +311,10 @@ const api = {
 		ipcRenderer.invoke("preferences:update", patch),
 	/** The command shells this platform offers, and where each is installed. */
 	preferencesCommandShells: (): Promise<CommandShellOption[]> => ipcRenderer.invoke("preferences:commandShells"),
+	/** Undo, cut, copy, paste… run natively on this window's focused field. */
+	editCommand: (command: EditCommand): Promise<void> => ipcRenderer.invoke("edit:command", command),
+	/** Installed font families, with Chinese names where the font has them. */
+	fontsList: (refresh?: boolean): Promise<SystemFont[]> => ipcRenderer.invoke("fonts:list", refresh),
 
 	/** Null when this session works in the project directory like any other. */
 	worktreeStatus: (sessionId: string): Promise<WorktreeStatus | null> =>

@@ -11,9 +11,11 @@ export function useAppearanceVariables(input: {
 	density: UiDensity;
 	chatWidth: ChatWidthMode;
 	chatFontSizePx: number;
+	/** Overrides the scale's code size for transcript code blocks. */
+	chatCodeFontSizePx?: number | null;
 	terminalFontSizePx: number;
 }): void {
-	const { density, chatWidth, chatFontSizePx, terminalFontSizePx } = input;
+	const { density, chatWidth, chatFontSizePx, chatCodeFontSizePx, terminalFontSizePx } = input;
 
 	useEffect(() => {
 		const rootStyle = document.documentElement.style;
@@ -31,7 +33,7 @@ export function useAppearanceVariables(input: {
 			"--app-font-size-ui-timestamp": `${scale.uiTimestampPx}px`,
 			"--app-font-size-chat": `${scale.chatPx}px`,
 			"--app-font-size-chat-body": `${scale.chatBodyPx}px`,
-			"--app-font-size-chat-code": `${scale.chatCodePx}px`,
+			"--app-font-size-chat-code": `${chatCodeFontSizePx ?? scale.chatCodePx}px`,
 			"--app-font-size-chat-meta": `${scale.chatMetaPx}px`,
 			"--app-font-size-chat-tiny": `${scale.chatTinyPx}px`,
 			"--app-font-size-terminal": `${terminalFontSizePx}px`,
@@ -46,5 +48,5 @@ export function useAppearanceVariables(input: {
 				rootStyle.removeProperty(name);
 			}
 		};
-	}, [density, chatWidth, chatFontSizePx, terminalFontSizePx]);
+	}, [density, chatWidth, chatFontSizePx, chatCodeFontSizePx, terminalFontSizePx]);
 }

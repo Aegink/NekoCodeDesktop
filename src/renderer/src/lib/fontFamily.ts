@@ -8,6 +8,9 @@ const CSS_WIDE_KEYWORDS = new Set(["inherit", "initial", "revert", "revert-layer
 export const DEFAULT_MONOSPACE_FONT_FAMILY_STACK =
   '"JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace';
 
+export const DEFAULT_UI_FONT_FAMILY_STACK =
+  '-apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif';
+
 const GENERIC_FONT_FAMILIES = new Set([
   "cursive",
   "emoji",
@@ -128,4 +131,17 @@ export function normalizeMonospaceFontFamilyCssValue(
   return hasGenericFontFamily(normalizedValue)
     ? normalizedValue
     : `${normalizedValue}, ${DEFAULT_MONOSPACE_FONT_FAMILY_STACK}`;
+}
+
+// Same idea for user-picked UI fonts: a family that is not installed (or lacks CJK
+// glyphs) falls through to the native stack instead of the browser's serif default.
+export function normalizeUiFontFamilyCssValue(value: string | null | undefined): string | null {
+  const normalizedValue = normalizeFontFamilyCssValue(value);
+  if (normalizedValue === null || CSS_WIDE_KEYWORDS.has(normalizedValue.toLowerCase())) {
+    return normalizedValue;
+  }
+
+  return hasGenericFontFamily(normalizedValue)
+    ? normalizedValue
+    : `${normalizedValue}, ${DEFAULT_UI_FONT_FAMILY_STACK}`;
 }

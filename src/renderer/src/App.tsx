@@ -52,11 +52,10 @@ import { IconButton } from "./components/ui/icon-button";
 import type { LayoutMode } from "./components/LayoutModeSwitch";
 import type { InlineEditRequest } from "./components/ide/EditorArea";
 import { Spinner } from "./components/ui/spinner";
+import { useAppearancePreferences } from "./hooks/useAppearancePreferences";
 import { useAppearanceVariables } from "./hooks/useAppearanceVariables";
 import { useSessions } from "./hooks/useSessions";
 import { useTheme } from "./hooks/useTheme";
-import { DEFAULT_UI_DENSITY, type UiDensity } from "./lib/appDensity";
-import { DEFAULT_CHAT_WIDTH, type ChatWidthMode } from "./lib/chatWidth";
 import { cn } from "./lib/utils";
 import { shareStructure } from "./lib/structural-share";
 import { LinkOpenerContext, openLinkExternally } from "./lib/webSources";
@@ -71,8 +70,6 @@ const IdeLayout = lazy(() => import("./components/ide/IdeLayout"));
 
 const PROJECT_STORAGE_KEY = "nekocode:project-cwd";
 const WORKSPACES_STORAGE_KEY = "nekocode:workspaces";
-const DENSITY_STORAGE_KEY = "nekocode:density";
-const CHAT_WIDTH_STORAGE_KEY = "nekocode:chat-width";
 const DOCK_WIDTH_STORAGE_KEY = "nekocode:dock-width";
 const DOCK_OPEN_STORAGE_KEY = "nekocode:dock-open";
 const SIDEBAR_OPEN_STORAGE_KEY = "nekocode:sidebar-open";
@@ -114,24 +111,14 @@ export default function App() {
 	const [cwd, setCwd] = useState<string | null>(
 		() => readStored(PROJECT_STORAGE_KEY) ?? (api.homeDir || null),
 	);
-	const [density] = useState<UiDensity>(() => {
-		const stored = readStored(DENSITY_STORAGE_KEY);
-		return stored === "compact" || stored === "spacious" || stored === "comfortable"
-			? stored
-			: DEFAULT_UI_DENSITY;
-	});
-	const [chatWidth] = useState<ChatWidthMode>(() => {
-		const stored = readStored(CHAT_WIDTH_STORAGE_KEY);
-		return stored === "wide" || stored === "full" || stored === "standard"
-			? stored
-			: DEFAULT_CHAT_WIDTH;
-	});
+	const { preferences: appearance } = useAppearancePreferences();
 
 	useAppearanceVariables({
-		density,
-		chatWidth,
-		chatFontSizePx: 12,
-		terminalFontSizePx: 12,
+		density: appearance.density,
+		chatWidth: appearance.chatWidth,
+		chatFontSizePx: appearance.fontSizePx,
+		chatCodeFontSizePx: appearance.codeFontSizePx,
+		terminalFontSizePx: appearance.terminalFontSizePx,
 	});
 
 	const [view, setView] = useState<WorkspaceView>("chat");

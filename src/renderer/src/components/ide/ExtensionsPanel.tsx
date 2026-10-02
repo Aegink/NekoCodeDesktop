@@ -10,7 +10,7 @@ import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
 import { extensionRuntime } from "./extension-runtime";
 import { PanelHeader, PanelIconButton } from "./PanelChrome";
 

@@ -10,7 +10,7 @@ import { cn } from "../../lib/utils";
 import { CHAT_MAIN_CONTENT_SURFACE_CLASS_NAME } from "../chat/composerPickerStyles";
 import { TerminalPanel } from "../TerminalPanel";
 import { Button } from "../ui/button";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
 import { EditorArea, type EditorAreaHandle, type EditorStatus, type InlineEditRequest } from "./EditorArea";
 import { extensionRuntime } from "./extension-runtime";
 import { ExtensionsPanel } from "./ExtensionsPanel";

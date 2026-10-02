@@ -5,10 +5,17 @@ directories:
   buildResources: resources/icons
 artifactName: NekoCode-Desktop-${version}-${os}-${arch}.${ext}
 asar: true
+# Chromium's UI strings (context menus, dialogs) for the languages the app
+# itself offers; the other ~50 locale packs were ~48 MB nobody reads.
+electronLanguages:
+  - zh-CN
+  - zh-TW
+  - en-US
 # node-pty 1.1 uses stable Node-API: official Windows/macOS prebuilds and the
 # Linux binary built by bun install work in Electron without another ABI rebuild.
 # Each architecture is built on a matching native runner.
 npmRebuild: false
+# Keep in sync with the includes repeated under win/mac/linux `files` below.
 files:
   - out/main/**/*
   - out/preload/**/*
@@ -29,6 +36,13 @@ files:
   # scratch; the prebuilt parsers are what runs. Each platform below also drops
   # the other platforms' prebuilds.
   - '!node_modules/@ast-grep/lang-*/src/**/*'
+  # Nothing loads type declarations at runtime (no TypeScript compiler ships),
+  # and the pi workspace packages are linked whole, TypeScript sources and doc
+  # screenshots included, next to the dist/ that actually runs. Their docs/ and
+  # examples/ stay: the agent reads them when asked about pi itself.
+  - '!node_modules/**/*.d.{ts,mts,cts}'
+  - '!node_modules/@earendil-works/*/src/**/*'
+  - '!node_modules/@earendil-works/*/docs/images/**/*'
 asarUnpack:
   - node_modules/node-pty/**/*
   - node_modules/@esbuild/**/*
@@ -65,6 +79,15 @@ win:
   icon: resources/icons/icon.ico
   target: nsis
   files:
+    # A platform `files` list REPLACES the top-level one for the app's own
+    # files (only its `!` exclusions are merged into node_modules), so the
+    # includes must be repeated here. A list of exclusions alone means
+    # "everything in the repo" — dist/, demo/, mobile/ and src/ included.
+    - out/main/**/*
+    - out/preload/**/*
+    - out/renderer/**/*
+    - package.json
+    - licenses/**/*
     - '!node_modules/@ast-grep/lang-*/prebuilds/prebuild-{Linux,macOS}-*/**/*'
 nsis:
   oneClick: false
@@ -84,12 +107,24 @@ mac:
   hardenedRuntime: false
   notarize: false
   files:
+    # Includes repeated for the reason given under `win.files`.
+    - out/main/**/*
+    - out/preload/**/*
+    - out/renderer/**/*
+    - package.json
+    - licenses/**/*
     - '!node_modules/@ast-grep/lang-*/prebuilds/prebuild-{Linux,Windows}-*/**/*'
 linux:
   icon: resources/icons/icon.png
   category: Development
   maintainer: ChuxinNeko
   files:
+    # Includes repeated for the reason given under `win.files`.
+    - out/main/**/*
+    - out/preload/**/*
+    - out/renderer/**/*
+    - package.json
+    - licenses/**/*
     - '!node_modules/@ast-grep/lang-*/prebuilds/prebuild-{macOS,Windows}-*/**/*'
   target:
     - AppImage

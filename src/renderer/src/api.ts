@@ -114,6 +114,7 @@ import type {
 	SkillsSnapshot,
 } from "../../shared/skills";
 import type { AppPreferences, CommandShellOption } from "../../shared/preferences";
+import type { SystemFont } from "../../shared/font-names";
 import type {
 	WorktreeMergeRequest,
 	WorktreeMergeResult,
@@ -142,7 +143,7 @@ import type {
 	RelayVerifyRequest,
 } from "../../shared/relay";
 import type { TokenUsageReport } from "../../shared/tokenStats";
-import type { ShellInfo, WindowMaterial } from "../../shared/window";
+import type { EditCommand, ShellInfo, WindowMaterial } from "../../shared/window";
 import type { SaveWebUiConfigRequest, WebUiStatus } from "../../shared/webui";
 import { createWebUiApi } from "./webui-api";
 
@@ -279,6 +280,10 @@ export interface AgentApi {
 	preferencesUpdate(patch: Partial<AppPreferences>): Promise<AppPreferences>;
 	/** The command shells this platform offers, and where each is installed. */
 	preferencesCommandShells(): Promise<CommandShellOption[]>;
+	/** Undo, cut, copy, paste… run natively on this window's focused field. Desktop only. */
+	editCommand(command: EditCommand): Promise<void>;
+	/** Installed font families, with Chinese names where the font has them. Desktop only. */
+	fontsList(refresh?: boolean): Promise<SystemFont[]>;
 	/** Null when this session works in the project directory like any other. */
 	worktreeStatus(sessionId: string): Promise<WorktreeStatus | null>;
 	worktreeList(): Promise<WorktreeRecord[]>;

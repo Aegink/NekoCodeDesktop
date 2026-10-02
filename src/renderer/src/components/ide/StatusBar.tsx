@@ -3,7 +3,7 @@ import { VscError, VscSourceControl, VscSparkle, VscWarning } from "react-icons/
 import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { Spinner } from "../ui/spinner";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
 import type { EditorAreaHandle, EditorStatus } from "./EditorArea";
 import type { IdeWorkspace } from "./ide-store";
 import { setTabCompletionEnabled, tabCompletionStore } from "./tab-completion";

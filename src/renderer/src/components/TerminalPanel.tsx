@@ -4,6 +4,7 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import type { SshHost } from "../../../shared/ssh";
 import { api, errorMessage } from "../api";
+import { readCodeFontFamily, useAppearancePreferences } from "../hooks/useAppearancePreferences";
 import { useTranslation } from "../i18n";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -38,6 +39,21 @@ export function TerminalPanel({
 		api.sshStatus().then((status) => setServers(status.hosts)).catch(() => {});
 	}, []);
 	const server = target ? servers.find((entry) => entry.id === target) : undefined;
+	const { preferences: appearance } = useAppearancePreferences();
+	// Read at creation through a ref so a font change restyles the live terminal
+	// below instead of tearing down its shell session.
+	const appearanceRef = useRef(appearance);
+	appearanceRef.current = appearance;
+
+	useEffect(() => {
+		const terminal = terminalRef.current;
+		if (!terminal) return;
+		terminal.options.fontFamily = readCodeFontFamily();
+		terminal.options.fontSize = appearance.terminalFontSizePx;
+		fitRef.current?.fit();
+		const id = sessionIdRef.current;
+		if (id) void api.terminalResize({ id, cols: terminal.cols, rows: terminal.rows });
+	}, [appearance.terminalFontSizePx, appearance.codeFontFamily]);
 
 	useEffect(() => {
 		// A remote shell needs no project; a local one starts in it.
@@ -46,9 +62,10 @@ export function TerminalPanel({
 		if (!host) return;
 		setError(null);
 
+		const { terminalFontSizePx } = appearanceRef.current;
 		const terminal = new Terminal({
-			fontFamily: "var(--font-mono-family, ui-monospace, monospace)",
-			fontSize: 12,
+			fontFamily: readCodeFontFamily(),
+			fontSize: terminalFontSizePx,
 			cursorBlink: true,
 			theme: { background: "transparent" },
 		});

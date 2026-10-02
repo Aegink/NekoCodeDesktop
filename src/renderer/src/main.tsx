@@ -5,6 +5,8 @@ import { HostDirectoryPickerProvider } from "./components/HostDirectoryPicker";
 import { I18nProvider } from "./i18n";
 import "./index.css";
 import "./hooks/useTheme";
+import "./hooks/useAppearancePreferences";
+import "./lib/importedFonts";
 
 const container = document.getElementById("root");
 if (!container) throw new Error("Missing #root");

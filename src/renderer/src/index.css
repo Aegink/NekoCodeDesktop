@@ -709,29 +709,30 @@
   color-scheme: light;
   --radius: 0.625rem;
   --radius-user-message: 1rem;
+  /* `--user-font-*` is the font picked in Settings → Appearance; it outranks the
+     theme pack's font so switching code themes never undoes it. */
   --font-ui-family: var(
-    --theme-font-ui-family,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    system-ui,
-    sans-serif
+    --user-font-ui-family,
+    var(--theme-font-ui-family, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif)
   );
   /* Display/wordmark face: Cal Sans ships as a single semibold-looking cut, so
      consumers should pair it with a normal font-weight. */
   --font-display-family: "Cal Sans", var(--font-ui-family);
   --font-mono-family: var(
-    --theme-font-code-family,
-    "JetBrains Mono Variable",
-    "JetBrains Mono",
-    "SF Mono",
-    "SFMono-Regular",
-    Consolas,
-    "Liberation Mono",
-    Menlo,
-    monospace
+    --user-font-code-family,
+    var(
+      --theme-font-code-family,
+      "JetBrains Mono Variable",
+      "JetBrains Mono",
+      "SF Mono",
+      "SFMono-Regular",
+      Consolas,
+      "Liberation Mono",
+      Menlo,
+      monospace
+    )
   );
-  --font-chat-code-family: var(--theme-font-code-family, var(--font-mono-family));
+  --font-chat-code-family: var(--font-mono-family);
   --terminal-font-family: "JetBrainsMono NFM", "JetBrainsMono NF", "JetBrains Mono", monospace;
   --app-shell-background: transparent;
   --app-window-backdrop-filter: blur(4px) saturate(130%);
@@ -911,9 +912,19 @@ body {
   font-family: var(--font-chat-code-family);
 }
 
-/* Model reasoning stream: Microsoft YaHei over the UI stack. */
+/* Settings → Appearance → code ligatures. Unset leaves the font's own default. */
+pre,
+code,
+kbd,
+samp,
+.font-chat-code,
+.font-mono {
+  font-variant-ligatures: var(--app-code-font-variant-ligatures, normal);
+}
+
+/* Model reasoning stream: Microsoft YaHei over the UI stack, unless the user picked a UI font. */
 .font-thinking {
-  font-family: "Microsoft YaHei", var(--font-ui-family);
+  font-family: var(--user-font-ui-family, "Microsoft YaHei", var(--font-ui-family));
 }
 
 html,

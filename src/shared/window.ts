@@ -51,3 +51,12 @@ export const DEFAULT_SHELL_INFO: ShellInfo = {
 	materials: ["opaque"],
 	titleBarHeight: TITLE_BAR_HEIGHT,
 };
+
+/**
+ * The editing commands a renderer may ask its own webContents to run. Going
+ * through Chromium (rather than `execCommand` or the async clipboard API) is
+ * what makes a menu paste behave exactly like Ctrl+V: it fires a real `paste`
+ * event, images included, and lands in the field's own undo history.
+ */
+export const EDIT_COMMANDS = ["undo", "redo", "cut", "copy", "paste", "selectAll"] as const;
+export type EditCommand = (typeof EDIT_COMMANDS)[number];

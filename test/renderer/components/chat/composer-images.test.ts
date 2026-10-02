@@ -1,6 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_PROMPT_IMAGE_BYTES } from "../../../../src/shared/agent";
-import { fileToPromptImage, imageMimeType, SUPPORTED_PROMPT_IMAGE_TYPES } from "../../../../src/renderer/src/components/chat/composer-images";
+import {
+	fileToPromptImage,
+	imageMimeType,
+	namePastedImages,
+	pastedImageFiles,
+	SUPPORTED_PROMPT_IMAGE_TYPES,
+} from "../../../../src/renderer/src/components/chat/composer-images";
 
 describe("imageMimeType", () => {
 	test("accepts declared supported types", () => {
@@ -72,5 +78,45 @@ describe("fileToPromptImage", () => {
 	test("rejects empty files and empty names", async () => {
 		await expect(fileToPromptImage(new File([], "empty.png", { type: "image/png" }))).rejects.toThrow();
 		await expect(fileToPromptImage(new File([new Uint8Array(4)], " ", { type: "image/png" }))).rejects.toThrow();
+	});
+});
+
+/** Just enough of DataTransfer for the paste rules. */
+function clipboard(types: string[], files: File[]): DataTransfer {
+	return {
+		types,
+		items: files.map((file) => ({ kind: "file", getAsFile: () => file })),
+	} as unknown as DataTransfer;
+}
+
+const png = (name: string) => new File([new Uint8Array([1, 2, 3])], name, { type: "image/png" });
+
+describe("pastedImageFiles", () => {
+	test("takes the images from a clipboard with no text", () => {
+		const shot = png("image.png");
+		expect(pastedImageFiles(clipboard(["Files"], [shot]))).toEqual([shot]);
+	});
+
+	test("leaves a clipboard with text to paste as text", () => {
+		// Spreadsheet cells: the text, plus a rendered picture of them.
+		expect(pastedImageFiles(clipboard(["text/plain", "Files"], [png("image.png")]))).toEqual([]);
+	});
+
+	test("skips files that aren't supported images", () => {
+		const pdf = new File([new Uint8Array([1])], "spec.pdf", { type: "application/pdf" });
+		expect(pastedImageFiles(clipboard(["Files"], [pdf]))).toEqual([]);
+	});
+});
+
+describe("namePastedImages", () => {
+	test("gives generic screenshot names a timestamp and keeps real names", () => {
+		const now = new Date(2026, 9, 2, 9, 5, 7);
+		const named = namePastedImages([png("image.png"), png("image.png"), png("diagram.png")], now);
+		expect(named.map((file) => file.name)).toEqual([
+			"pasted-20261002-090507.png",
+			"pasted-20261002-090507-2.png",
+			"diagram.png",
+		]);
+		expect(named[0].type).toBe("image/png");
 	});
 });

@@ -13,12 +13,14 @@ import {
 	type MentionCandidate,
 } from "../../../../shared/mentions";
 import { BorderBeam } from "border-beam";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTheme } from "../../hooks/useTheme";
 import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
 import { AddPlusIcon, ComposerSendArrowIcon, FileIcon, SkillCubeIcon, StopIcon, XIcon, ZapIcon } from "../../lib/icons";
-import { fileToPromptImage, imageMimeType } from "./composer-images";
+import { fileToPromptImage, imageMimeType, namePastedImages, pastedImageFiles } from "./composer-images";
+import { editShortcut, hasSelection, redoShortcut, runEditCommand } from "../../lib/editCommands";
+import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
 import { ContextGauge } from "./ContextGauge";
 import { Button } from "../ui/button";
 import { ComposerColumnFrame } from "./ComposerColumnFrame";
@@ -344,6 +346,44 @@ export function ComposerShell(props: ComposerShellProps) {
 		setImageError(failed);
 	};
 
+	/**
+	 * Ctrl+V and the menu's paste both land here (on the desktop the menu runs a
+	 * native paste). Text pastes as usual; a clipboard of only images attaches them.
+	 */
+	const onPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+		if (!imagesAllowed) return;
+		const files = pastedImageFiles(event.clipboardData);
+		if (files.length === 0) return;
+		event.preventDefault();
+		void addFiles(namePastedImages(files));
+	};
+
+	const [editMenu, setEditMenu] = useState<ContextMenuState | null>(null);
+	const closeEditMenu = useCallback(() => setEditMenu(null), []);
+
+	const onContextMenu = (event: React.MouseEvent<HTMLTextAreaElement>) => {
+		event.preventDefault();
+		const field = event.currentTarget;
+		const selected = hasSelection(field);
+		const run = (command: Parameters<typeof runEditCommand>[0]) => () => {
+			void runEditCommand(command, field, (files) => void addFiles(namePastedImages(files))).catch(() => {});
+		};
+		setEditMenu({
+			x: event.clientX,
+			y: event.clientY,
+			items: [
+				{ label: t("editMenu.undo"), shortcut: editShortcut("Z"), disabled, onSelect: run("undo") },
+				{ label: t("editMenu.redo"), shortcut: redoShortcut(), disabled, onSelect: run("redo") },
+				{ kind: "separator" },
+				{ label: t("editMenu.cut"), shortcut: editShortcut("X"), disabled: disabled || !selected, onSelect: run("cut") },
+				{ label: t("editMenu.copy"), shortcut: editShortcut("C"), disabled: !selected, onSelect: run("copy") },
+				{ label: t("editMenu.paste"), shortcut: editShortcut("V"), disabled, onSelect: run("paste") },
+				{ kind: "separator" },
+				{ label: t("editMenu.selectAll"), shortcut: editShortcut("A"), disabled: field.value.length === 0, onSelect: run("selectAll") },
+			],
+		});
+	};
+
 	const removeImage = (id: string) => {
 		setImages((current) => current.filter((image) => image.id !== id));
 		setImageError(null);
@@ -600,6 +640,8 @@ export function ComposerShell(props: ComposerShellProps) {
 											setMention(null);
 										}}
 										onKeyDown={onKeyDown}
+										onPaste={onPaste}
+										onContextMenu={onContextMenu}
 										placeholder={
 											command
 												? (command.argumentHint ?? t("commands.argsPlaceholder"))
@@ -676,6 +718,7 @@ export function ComposerShell(props: ComposerShellProps) {
 					</BorderBeam>
 				</div>
 			</ComposerColumnFrame>
+			<ContextMenu menu={editMenu} onClose={closeEditMenu} />
 		</div>
 	);
 }

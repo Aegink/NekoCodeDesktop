@@ -9,7 +9,7 @@ import { FolderIcon, FolderOpenIcon } from "../../lib/icons";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { ConfirmDialog } from "../ui/confirm-dialog";
-import { ContextMenu, type ContextMenuItem, type ContextMenuState } from "./ContextMenu";
+import { ContextMenu, type ContextMenuItem, type ContextMenuState } from "../ui/context-menu";
 import { isWithinPath, type IdeWorkspace } from "./ide-store";
 import { GIT_STATUS_CLASS, type GitDecorations } from "./git-decorations";
 import { PanelHeader, PanelIconButton } from "./PanelChrome";
