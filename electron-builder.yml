@@ -129,4 +129,11 @@ linux:
   target:
     - AppImage
     - deb
-publish: null
+# Writes app-update.yml (the updater's cache directory name) and latest*.yml;
+# CI uploads them with the installers and the NSIS blockmap, which
+# electron-updater uses to download only the changed blocks
+# (src/main/app-updates.ts). Nothing is published from here: --publish never.
+publish:
+  provider: github
+  owner: ChuxinNeko
+  repo: NekoCodeDesktop

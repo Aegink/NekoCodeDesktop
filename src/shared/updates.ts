@@ -23,6 +23,18 @@ export type UpdateCheckResult = { checkedAt: number; currentVersion: string } & 
 	| { status: "error"; error: UpdateError }
 );
 
+/**
+ * In-app download and install of a release (electron-updater). "unsupported"
+ * builds — macOS without a Developer ID, deb, development, WebUI — fall back to
+ * the release page.
+ */
+export type UpdateInstallState =
+	| { phase: "unsupported" }
+	| { phase: "idle" }
+	| { phase: "downloading"; version: string; transferred: number; total: number }
+	| { phase: "downloaded"; version: string }
+	| { phase: "error"; version: string; message: string };
+
 /** SemVer precedence; build metadata does not change precedence. Accept GitHub's v prefix. */
 export function parseVersion(value: string): { core: bigint[]; prerelease: string[] } | null {
 	const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(value);

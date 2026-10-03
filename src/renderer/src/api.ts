@@ -10,7 +10,7 @@ import type {
 	DesktopPointerInput,
 	DesktopState,
 } from "../../shared/remote-desktop";
-import type { AppVersionInfo, UpdateCheckResult } from "../../shared/updates";
+import type { AppVersionInfo, UpdateCheckResult, UpdateInstallState } from "../../shared/updates";
 import type {
 	InstallPluginRequest,
 	PluginActionRequest,
@@ -170,6 +170,10 @@ export interface AgentApi {
 	checkForUpdates(): Promise<UpdateCheckResult>;
 	checkForUpdatesOnStartup(): Promise<UpdateCheckResult | null>;
 	dismissStartupUpdate(): Promise<void>;
+	updateInstallState(): Promise<UpdateInstallState>;
+	downloadUpdate(tag: string): Promise<UpdateInstallState>;
+	installUpdate(): Promise<void>;
+	onUpdateInstallState(listener: (state: UpdateInstallState) => void): () => void;
 	/** Window chrome the renderer lays out around: caption strip height, backdrop material. */
 	shell: ShellInfo;
 	/** The material this machine can composite; see {@link ShellInfo.materials}. */

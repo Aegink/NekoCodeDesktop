@@ -96,6 +96,11 @@ export function createWebUiApi(runtime: WebUiRuntime): AgentApi {
 		qqBotChooseProject: unsupported("WebUI 请使用宿主目录选择器"),
 		webUiStatus: unsupported("请在桌面应用中配置 WebUI"),
 		webUiSave: unsupported("请在桌面应用中配置 WebUI"),
+		// Installing replaces the host's app; that stays a decision made at the host.
+		updateInstallState: () => Promise.resolve({ phase: "unsupported" }),
+		downloadUpdate: unsupported("请在桌面应用中更新"),
+		installUpdate: unsupported("请在桌面应用中更新"),
+		onUpdateInstallState: () => () => {},
 		// SSH passwords are configured on the desktop; remote shells stay there too.
 		sshStatus: () => Promise.resolve({ hosts: [], canStoreSecrets: false }),
 		desktopStates: () => Promise.resolve([]),

@@ -67,7 +67,7 @@ import { PullRequestService } from "./pull-request-service";
 import { TerminalService } from "./terminal-service";
 import { TokenStatsService } from "./token-stats";
 import { tokenUsageCsv } from "./token-usage-export";
-import { appVersionInfo, AppUpdateService } from "./app-updates";
+import { AppInstallService, appVersionInfo, AppUpdateService, type InstallUpdater } from "./app-updates";
 import type {
 	InstallPluginRequest,
 	PluginActionRequest,
@@ -975,6 +975,20 @@ function registerIpc(): void {
 	ipcMain.handle("app:checkForUpdates", () => appUpdates.check());
 	ipcMain.handle("app:checkForUpdatesOnStartup", () => appUpdates.checkOnStartup());
 	ipcMain.handle("app:dismissStartupUpdate", () => appUpdates.dismissStartupUpdate());
+	const appInstall = new AppInstallService({
+		// macOS needs a Developer ID for Squirrel.Mac and deb needs root: both
+		// keep the release page. APPIMAGE is set by the AppImage runtime.
+		supported: app.isPackaged && (process.platform === "win32" || (process.platform === "linux" && !!process.env.APPIMAGE)),
+		currentVersion: () => versionInfo().version,
+		loadUpdater: async () => (await import("electron-updater")).autoUpdater as unknown as InstallUpdater,
+		publish: (state) => {
+			for (const window of BrowserWindow.getAllWindows())
+				if (!window.isDestroyed()) window.webContents.send("app:updateInstallState", state);
+		},
+	});
+	ipcMain.handle("app:updateInstallState", () => appInstall.state());
+	ipcMain.handle("app:downloadUpdate", (_event, tag: unknown) => appInstall.download(tag));
+	ipcMain.handle("app:installUpdate", () => appInstall.install());
 	ipcMain.handle("browser:setInspect", (event, guestId: number, enabled: boolean) => {
 		if (!Number.isInteger(guestId) || typeof enabled !== "boolean") throw new Error("Invalid inspector request");
 		return browserInspector?.setInspect(event.sender, guestId, enabled);

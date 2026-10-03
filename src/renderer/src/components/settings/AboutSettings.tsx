@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
-import type { AppVersionInfo, UpdateCheckResult } from "../../../../shared/updates";
+import type { AppVersionInfo, UpdateCheckResult, UpdateInstallState } from "../../../../shared/updates";
 import { RELEASES_URL, UPDATE_REPOSITORY } from "../../../../shared/updates";
 import { api, errorMessage } from "../../api";
 import { useTranslation } from "../../i18n";
 import { ExternalLinkIcon, RefreshCwIcon } from "../../lib/icons";
 import { Button } from "../ui/button";
 import { ReleaseNotes } from "../updates/ReleaseNotes";
+import { UpdateInstallActions, useUpdateInstallState } from "../updates/UpdateInstall";
 
 interface AboutSettingsViewProps {
 	info: AppVersionInfo | null;
 	result: UpdateCheckResult | null;
+	install: UpdateInstallState | null;
 	busy: boolean;
 	loading: boolean;
 	error: string | null;
@@ -17,7 +19,7 @@ interface AboutSettingsViewProps {
 	onOpen: (url: string) => void;
 }
 
-export function AboutSettingsView({ info, result, busy, loading, error, onCheck, onOpen }: AboutSettingsViewProps) {
+export function AboutSettingsView({ info, result, install, busy, loading, error, onCheck, onOpen }: AboutSettingsViewProps) {
 	const { t, language } = useTranslation();
 	const release = result && "release" in result ? result.release : null;
 	return (
@@ -64,10 +66,15 @@ export function AboutSettingsView({ info, result, busy, loading, error, onCheck,
 								{release.publishedAt ? ` · ${new Date(release.publishedAt).toLocaleDateString(language)}` : ""}
 							</p>
 						</div>
-						<Button size="sm" variant={result?.status === "available" ? "default" : "chrome-outline"} onClick={() => onOpen(release.url)}>
-							<ExternalLinkIcon className="size-3.5" />
-							{result?.status === "available" ? t("updates.download") : t("updates.viewRelease")}
-						</Button>
+						{result?.status === "available" ? (
+							<div className="flex flex-wrap items-center justify-end gap-2">
+								<UpdateInstallActions release={release} state={install} onOpen={onOpen} />
+							</div>
+						) : (
+							<Button size="sm" variant="chrome-outline" onClick={() => onOpen(release.url)}>
+								<ExternalLinkIcon className="size-3.5" />{t("updates.viewRelease")}
+							</Button>
+						)}
 					</div>
 					<div className="space-y-2 border-t border-border pt-3">
 						<h4 className="text-xs font-medium">{t("updates.notes")}</h4>
@@ -92,6 +99,7 @@ export function AboutSettings() {
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const install = useUpdateInstallState();
 	useEffect(() => {
 		let active = true;
 		api.appVersion().then((value) => { if (active) setInfo(value); })
@@ -117,5 +125,5 @@ export function AboutSettings() {
 		setError(null);
 		void api.openExternal(url).catch((cause) => setError(errorMessage(cause)));
 	};
-	return <AboutSettingsView info={info} result={result} busy={busy} loading={loading} error={error} onCheck={() => void check()} onOpen={open} />;
+	return <AboutSettingsView info={info} result={result} install={install} busy={busy} loading={loading} error={error} onCheck={() => void check()} onOpen={open} />;
 }

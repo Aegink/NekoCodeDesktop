@@ -2,10 +2,10 @@ import { Dialog } from "@base-ui/react/dialog";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api";
 import { useTranslation } from "../../i18n";
-import { ExternalLinkIcon } from "../../lib/icons";
 import { scheduleStartupUpdate, type UpdateNotice } from "../../lib/startupUpdate";
 import { Button } from "../ui/button";
 import { ReleaseNotes } from "./ReleaseNotes";
+import { UpdateInstallActions, useUpdateInstallState } from "./UpdateInstall";
 
 export function UpdateDialog({ notice, onClose, deferred = false }: {
 	notice: UpdateNotice | null;
@@ -15,6 +15,7 @@ export function UpdateDialog({ notice, onClose, deferred = false }: {
 	const { t, language } = useTranslation();
 	const [error, setError] = useState<string | null>(null);
 	const [opening, setOpening] = useState(false);
+	const install = useUpdateInstallState();
 	const openLink = async (url: string, close = false) => {
 		setError(null);
 		setOpening(true);
@@ -46,9 +47,7 @@ export function UpdateDialog({ notice, onClose, deferred = false }: {
 					{error ? <p role="alert" className="shrink-0 text-xs text-destructive">{error}</p> : null}
 					<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
 						<Button size="sm" variant="chrome-outline" onClick={onClose}>{t("updates.later")}</Button>
-						<Button size="sm" onClick={() => void openLink(release.url, true)} disabled={opening}>
-							<ExternalLinkIcon className="size-3.5" />{t("updates.download")}
-						</Button>
+						<UpdateInstallActions release={release} state={install} onOpen={(url) => { if (!opening) void openLink(url, true); }} />
 					</div>
 				</Dialog.Popup>
 			</Dialog.Portal>

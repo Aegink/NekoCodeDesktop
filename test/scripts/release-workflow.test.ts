@@ -10,11 +10,12 @@ const script = workflow.jobs.release.steps.find((step) => step.uses === "actions
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor;
 const execute = new AsyncFunction("require", "process", "context", "github", "core", script);
 
-function fixture(includeAndroid: boolean, includeIos = true) {
+function fixture(includeAndroid: boolean, includeIos = true, includeUpdateFiles = true) {
 	const version = "0.0.3";
 	const names = ["win-x64.exe", "mac-x64.dmg", "mac-x64.zip", "mac-arm64.dmg", "mac-arm64.zip", "linux-x86_64.AppImage", "linux-amd64.deb"].map((suffix) => `NekoCode-Desktop-${version}-${suffix}`);
 	if (includeAndroid) names.push(`NekoCode-${version}-android.apk`);
 	if (includeIos) names.push(`NekoCode-${version}-ios-unsigned.ipa`);
+	if (includeUpdateFiles) names.push("latest.yml", "latest-linux.yml", `NekoCode-Desktop-${version}-win-x64.exe.blockmap`);
 	const files = new Map(names.map((name) => [name, Buffer.from(`fixture ${name}`)]));
 	const uploaded: string[] = [];
 	let published = false;
@@ -30,7 +31,7 @@ function fixture(includeAndroid: boolean, includeIos = true) {
 				createRelease: async () => { created = true; return { data: { id: 1, html_url: "https://example.test/release" } }; },
 				listReleaseAssets: async () => [],
 				uploadReleaseAsset: async ({ name }: { name: string }) => { uploaded.push(name); },
-				updateRelease: async () => { expect(uploaded).toHaveLength(10); published = true; },
+				updateRelease: async () => { expect(uploaded).toHaveLength(13); published = true; },
 			},
 		},
 	};
@@ -74,4 +75,17 @@ test("publication waits for iOS and cannot publish a release missing its IPA", a
 	await expect(f.run()).rejects.toThrow("NekoCode-0.0.3-ios-unsigned.ipa");
 	expect(f.created()).toBe(false);
 	expect(f.published()).toBe(false);
+});
+
+test("in-app update files upload with the release and stay out of the checksums", async () => {
+	const f = fixture(true);
+	await f.run();
+	expect(f.uploaded).toEqual(expect.arrayContaining(["latest.yml", "latest-linux.yml", "NekoCode-Desktop-0.0.3-win-x64.exe.blockmap"]));
+	expect(f.files.get("SHA256SUMS.txt")!.toString()).not.toContain("latest.yml");
+});
+
+test("publication refuses a release without the in-app update files", async () => {
+	const f = fixture(true, true, false);
+	await expect(f.run()).rejects.toThrow("latest.yml");
+	expect(f.created()).toBe(false);
 });

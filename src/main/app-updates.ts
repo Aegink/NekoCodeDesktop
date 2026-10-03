@@ -1,7 +1,7 @@
 import { version as packageVersion } from "../../package.json";
 import {
 	compareVersions, parseVersion, RELEASES_URL, UPDATE_REPOSITORY,
-	type AppVersionInfo, type UpdateCheckResult, type UpdateError,
+	type AppVersionInfo, type UpdateCheckResult, type UpdateError, type UpdateInstallState,
 } from "../shared/updates";
 
 export function appVersionInfo(packaged: boolean, runtimeVersion: string): AppVersionInfo {
@@ -94,5 +94,100 @@ export class AppUpdateService {
 		} finally {
 			clearTimeout(timer);
 		}
+	}
+}
+
+/** The part of electron-updater's AppUpdater that downloading and installing a release uses. */
+export interface InstallUpdater {
+	autoDownload: boolean;
+	autoInstallOnAppQuit: boolean;
+	setFeedURL(options: { provider: "generic"; url: string; useMultipleRangeRequest: boolean }): void;
+	checkForUpdates(): Promise<{ updateInfo: { version: string } } | null>;
+	downloadUpdate(): Promise<unknown>;
+	quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
+	on(event: "download-progress", listener: (progress: { transferred: number; total: number }) => void): unknown;
+}
+
+/**
+ * Downloads a release found by AppUpdateService and installs it on restart.
+ * electron-updater fetches only the blocks of the installer that changed since
+ * the installed version (the NSIS installer keeps a copy of itself for this;
+ * an AppImage diffs against itself), falling back to a full download.
+ */
+export class AppInstallService {
+	private current: UpdateInstallState;
+	private updater: Promise<InstallUpdater> | null = null;
+	private pending: Promise<UpdateInstallState> | null = null;
+	constructor(private readonly options: {
+		supported: boolean;
+		currentVersion: () => string;
+		loadUpdater: () => Promise<InstallUpdater>;
+		publish: (state: UpdateInstallState) => void;
+	}) {
+		this.current = options.supported ? { phase: "idle" } : { phase: "unsupported" };
+	}
+
+	state(): UpdateInstallState {
+		return this.current;
+	}
+
+	download(tag: unknown): Promise<UpdateInstallState> {
+		if (this.current.phase === "unsupported") return Promise.resolve(this.current);
+		const parsed = typeof tag === "string" ? parseVersion(tag) : null;
+		if (typeof tag !== "string" || !parsed || parsed.prerelease.length || !(compareVersions(tag, this.options.currentVersion())! > 0))
+			return Promise.reject(new Error("Invalid update version"));
+		// One download at a time; another window's click joins it.
+		if (this.pending) return this.pending;
+		const version = tag.replace(/^v/, "");
+		if (this.current.phase === "downloaded" && this.current.version === version) return Promise.resolve(this.current);
+		this.pending = this.run(tag, version).finally(() => { this.pending = null; });
+		return this.pending;
+	}
+
+	install(): void {
+		if (this.current.phase !== "downloaded" || !this.updater) throw new Error("No downloaded update to install");
+		// Silent: the assisted installer would otherwise ask for the directory again.
+		void this.updater.then((updater) => updater.quitAndInstall(true, true));
+	}
+
+	private async run(tag: string, version: string): Promise<UpdateInstallState> {
+		this.set({ phase: "downloading", version, transferred: 0, total: 0 });
+		try {
+			const updater = await (this.updater ??= this.prepare().catch((error: unknown) => {
+				this.updater = null;
+				throw error;
+			}));
+			// The release the check showed, from its own tag — not whatever is Latest by now.
+			updater.setFeedURL({
+				provider: "generic",
+				url: `${RELEASES_URL}/download/${encodeURIComponent(tag)}`,
+				// GitHub's asset CDN answers one range per request.
+				useMultipleRangeRequest: false,
+			});
+			const result = await updater.checkForUpdates();
+			if (result?.updateInfo.version !== version) throw new Error(`Release ${tag} has no update metadata for this platform`);
+			await updater.downloadUpdate();
+			this.set({ phase: "downloaded", version });
+		} catch (error) {
+			const message = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
+			this.set({ phase: "error", version, message });
+		}
+		return this.current;
+	}
+
+	private async prepare(): Promise<InstallUpdater> {
+		const updater = await this.options.loadUpdater();
+		updater.autoDownload = false;
+		// A download the user did not restart for is installed when the app quits.
+		updater.autoInstallOnAppQuit = true;
+		updater.on("download-progress", ({ transferred, total }) => {
+			if (this.current.phase === "downloading") this.set({ ...this.current, transferred, total });
+		});
+		return updater;
+	}
+
+	private set(state: UpdateInstallState): void {
+		this.current = state;
+		this.options.publish(state);
 	}
 }

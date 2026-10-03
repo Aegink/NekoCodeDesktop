@@ -100,6 +100,9 @@ jobs:
             dist/*.zip
             dist/*.AppImage
             dist/*.deb
+            dist/*.exe.blockmap
+            dist/latest.yml
+            dist/latest-linux.yml
 
   build-android:
     needs: plan
@@ -254,9 +257,12 @@ jobs:
             const names = suffixes.map(suffix => `NekoCode-Desktop-${version}-${suffix}`);
             names.push(`NekoCode-${version}-android.apk`);
             names.push(`NekoCode-${version}-ios-unsigned.ipa`);
+            // In-app updates (electron-updater) read the channel files from the
+            // release's own tag; the blockmap lets Windows fetch only changed blocks.
+            const updateFiles = ['latest.yml', 'latest-linux.yml', `NekoCode-Desktop-${version}-win-x64.exe.blockmap`];
             // Verify every platform before creating a tag or release.
             const available = await fs.readdir('installers');
-            const missing = names.filter(name => !available.includes(name));
+            const missing = [...names, ...updateFiles].filter(name => !available.includes(name));
             if (missing.length > 0) {
               throw new Error(`Missing release installers: ${missing.join(', ')}. Downloaded files: ${available.sort().join(', ')}`);
             }
@@ -266,7 +272,7 @@ jobs:
               sums.push(`${createHash('sha256').update(data).digest('hex')}  ${name}`);
             }
             await fs.writeFile('installers/SHA256SUMS.txt', sums.join('\n') + '\n');
-            names.push('SHA256SUMS.txt');
+            names.push(...updateFiles, 'SHA256SUMS.txt');
 
             let existing;
             try {
@@ -295,6 +301,6 @@ jobs:
               const data = await fs.readFile(path.join('installers', name));
               await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: release.id, name, data, headers: { 'content-type': 'application/octet-stream', 'content-length': data.length } });
             }
-            // Latest changes only after all nine installers and the checksum file are uploaded.
+            // Latest changes only after all nine installers, the update files and the checksum file are uploaded.
             await github.rest.repos.updateRelease({ owner, repo, release_id: release.id, name: `NekoCode Desktop ${tag}`, body, draft: false, prerelease, make_latest: prerelease ? 'false' : 'true' });
             core.info(`Published ${tag}: ${release.html_url}`);

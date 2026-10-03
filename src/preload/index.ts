@@ -10,7 +10,7 @@ import type {
 	DesktopPointerInput,
 	DesktopState,
 } from "../shared/remote-desktop";
-import type { AppVersionInfo, UpdateCheckResult } from "../shared/updates";
+import type { AppVersionInfo, UpdateCheckResult, UpdateInstallState } from "../shared/updates";
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { DEFAULT_SHELL_INFO, type EditCommand, type ShellInfo, type WindowMaterial } from "../shared/window";
 import type {
@@ -186,6 +186,10 @@ const api = {
 	checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke("app:checkForUpdates"),
 	checkForUpdatesOnStartup: (): Promise<UpdateCheckResult | null> => ipcRenderer.invoke("app:checkForUpdatesOnStartup"),
 	dismissStartupUpdate: (): Promise<void> => ipcRenderer.invoke("app:dismissStartupUpdate"),
+	updateInstallState: (): Promise<UpdateInstallState> => ipcRenderer.invoke("app:updateInstallState"),
+	downloadUpdate: (tag: string): Promise<UpdateInstallState> => ipcRenderer.invoke("app:downloadUpdate", tag),
+	installUpdate: (): Promise<void> => ipcRenderer.invoke("app:installUpdate"),
+	onUpdateInstallState: (listener: (state: UpdateInstallState) => void) => subscribe("app:updateInstallState", listener),
 	/** Window chrome the renderer has to lay out around (caption strip, backdrop). */
 	shell: shellInfo,
 	/** The user's home directory — the working directory a fresh install starts in. */
