@@ -980,7 +980,12 @@ function registerIpc(): void {
 		// keep the release page. APPIMAGE is set by the AppImage runtime.
 		supported: app.isPackaged && (process.platform === "win32" || (process.platform === "linux" && !!process.env.APPIMAGE)),
 		currentVersion: () => versionInfo().version,
-		loadUpdater: async () => (await import("electron-updater")).autoUpdater as unknown as InstallUpdater,
+		loadUpdater: async () => {
+			// import() of a CommonJS module: Node cannot detect `autoUpdater` (a
+			// getter) as a named export, so it is only on the default export.
+			const module = await import("electron-updater");
+			return (module.autoUpdater ?? module.default.autoUpdater) as unknown as InstallUpdater;
+		},
 		publish: (state) => {
 			for (const window of BrowserWindow.getAllWindows())
 				if (!window.isDestroyed()) window.webContents.send("app:updateInstallState", state);
