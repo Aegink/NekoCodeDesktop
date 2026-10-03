@@ -7,6 +7,7 @@ import type {
 } from "../../shared/automation";
 import { validateAutomationInput } from "../../shared/automation";
 import { nextOccurrence } from "../../shared/automationSchedule";
+import { join } from "node:path";
 import { AutomationStore } from "./store";
 import { AutomationRunner, type AutomationRunnerOptions, type AutomationRunOutcome } from "./runner";
 
@@ -52,6 +53,7 @@ export class AutomationService {
 			new AutomationRunner({
 				sessionsDir: options.sessionsDir,
 				getModelRuntime: options.getModelRuntime,
+				pluginStatePath: join(options.userDataDir, "plugins.json"),
 			});
 		this.onEvent = options.onEvent;
 		this.now = options.now ?? (() => Date.now());

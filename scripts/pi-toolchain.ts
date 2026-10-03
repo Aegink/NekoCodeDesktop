@@ -44,7 +44,6 @@ export function buildSteps(): BuildStep[] {
 		{ pkg: "ai", script: "build:offline" },
 		{ pkg: "durable", script: "build" },
 		{ pkg: "agent", script: "build" },
-		{ pkg: "session-backends/sqlite-node", script: "build" },
 		{ pkg: "protocol", script: "build" },
 		{ pkg: "client", script: "build" },
 		{ pkg: "server", script: "build" },

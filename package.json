@@ -1,6 +1,6 @@
 {
   "name": "nekocode-desktop",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "private": true,
   "description": "NekoCode Desktop - Electron desktop coding agent built on the PI agent core",
   "author": "ChuxinNeko",
@@ -11,8 +11,7 @@
   },
   "main": "out/main/index.js",
   "workspaces": [
-    "pi/packages/*",
-    "pi/packages/session-backends/*"
+    "pi/packages/*"
   ],
   "scripts": {
     "dev": "bunx --bun --no-install electron-vite dev",
@@ -53,10 +52,10 @@
     "@ast-grep/lang-rust": "0.0.7",
     "@ast-grep/lang-yaml": "0.0.6",
     "@ast-grep/napi": "0.45.3",
-    "@earendil-works/pi-agent-core": "workspace:0.99.1",
-    "@earendil-works/pi-ai": "workspace:0.99.1",
-    "@earendil-works/pi-coding-agent": "workspace:0.99.1",
-    "@earendil-works/pi-mcp": "workspace:0.99.1",
+    "@earendil-works/pi-agent-core": "workspace:1.0.0",
+    "@earendil-works/pi-ai": "workspace:1.0.0",
+    "@earendil-works/pi-coding-agent": "workspace:1.0.0",
+    "@earendil-works/pi-mcp": "workspace:1.0.0",
     "@tencent-connect/qqbot-nodejs": "^1.0.4",
     "@trycua/cua-driver": "0.28.2",
     "cheerio": "^1.2.0",

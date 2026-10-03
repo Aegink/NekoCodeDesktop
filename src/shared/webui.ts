@@ -89,6 +89,7 @@ export const WEBUI_RPC_METHODS = [
 	"agentSetWorkMode",
 	"agentAnswerWorkflow",
 	"agentCancelTask",
+	"agentAnswerExtensionUi",
 	"agentSetMode",
 	"preferencesGet",
 	"preferencesUpdate",

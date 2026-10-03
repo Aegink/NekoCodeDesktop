@@ -8,6 +8,7 @@ import type {
 	AgentSessionEvent,
 	ModelRuntime,
 	SessionManager,
+	SessionStartEvent,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -68,6 +69,7 @@ import { containsPath, resolveWorkspacePath } from "./workflow-paths";
 import { readSavedWorkflow, WorkflowState } from "./workflow-state";
 import { createWorkflowTools } from "./workflow-tools";
 import { pi, piAi } from "./pi";
+import { type PluginResourcePolicy, resolvePluginTrust, withEnabledPackages } from "./plugin-resources";
 
 const runFile = promisify(execFile);
 export const WORKFLOW_ENTRY = "nekocode.workflow.v1";
@@ -201,12 +203,18 @@ export async function createPromptResources(
 	isolated = false,
 	agentDir?: string,
 	builtinSkills?: BuiltinSkillSource,
+	/** Which pi packages may load, and who settles project trust; absent loads everything configured. */
+	plugins?: PluginResourcePolicy,
 ) {
-	const { DefaultResourceLoader, getAgentDir } = await pi();
+	const { DefaultResourceLoader, getAgentDir, SettingsManager } = await pi();
 	const noContextFiles = isolated && getContext().mode === "commit";
+	const dir = agentDir ?? getAgentDir();
 	const loader = new DefaultResourceLoader({
 		cwd,
-		agentDir: agentDir ?? getAgentDir(),
+		agentDir: dir,
+		...(plugins && !isolated
+			? { settingsManager: withEnabledPackages(SettingsManager.create(cwd, dir), (source) => plugins.isEnabled(source)) }
+			: {}),
 		noThemes: true,
 		// Rules the project keeps for Cursor, Windsurf, Copilot and the like, beside
 		// the AGENTS.md the core found; see foreign-rules.ts.
@@ -240,6 +248,18 @@ export async function createPromptResources(
 				}
 			: {}),
 	});
+	if (plugins && !isolated) {
+		// Every reload settles trust again, not only the first: the session's own
+		// `reload()` passes no options, and a project that gained an extensions
+		// directory or was trusted from the plugin page since should be read as it
+		// is now. A decision once made is saved, so this asks at most once.
+		const reload = loader.reload.bind(loader);
+		loader.reload = (options) =>
+			reload({
+				...options,
+				resolveProjectTrust: options?.resolveProjectTrust ?? (() => resolvePluginTrust(cwd, dir, plugins.askTrust)),
+			});
+	}
 	await loader.reload();
 	const original = loader.getSystemPrompt.bind(loader);
 	loader.getSystemPrompt = () =>
@@ -267,6 +287,8 @@ interface WorkflowRuntimeOptions {
 	getPluginTools?: () => readonly string[];
 	/** The skills that ship with the app; absent in tests and helper sessions. */
 	builtinSkills?: BuiltinSkillSource;
+	/** Which pi packages load, and who answers project trust; absent loads every configured one. */
+	plugins?: PluginResourcePolicy;
 	/**
 	 * The long-term memory section, read fresh on every prompt rebuild. Its
 	 * presence also means the session was given the memory tool.
@@ -946,6 +968,8 @@ export interface WorkflowSessionOptions extends WorkflowRuntimeOptions {
 	model?: Model<Api>;
 	thinkingLevel?: ThinkingLevel;
 	customTools?: ToolDefinition[];
+	/** Why the session is starting, as extensions hear it in `session_start`. */
+	sessionStartEvent?: SessionStartEvent;
 }
 export async function createWorkflowSession(options: WorkflowSessionOptions) {
 	const workflow = new WorkflowRuntime(options);
@@ -963,6 +987,7 @@ export async function createWorkflowSession(options: WorkflowSessionOptions) {
 		false,
 		options.agentDir,
 		options.builtinSkills,
+		options.plugins,
 	);
 	const piModule = await pi();
 	const { createAgentSession, createBashToolDefinition } = piModule;
@@ -994,6 +1019,7 @@ export async function createWorkflowSession(options: WorkflowSessionOptions) {
 			],
 			toolOptions: workflow.shell.toolOptions,
 			compactionInstructions: COMPACTION_INSTRUCTIONS,
+			...(options.sessionStartEvent ? { sessionStartEvent: options.sessionStartEvent } : {}),
 		});
 		workflow.attach(result.session);
 		if (fusion) await workflow.setFusion(fusion.config);

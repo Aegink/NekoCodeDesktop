@@ -237,7 +237,54 @@ export interface AgentSnapshot {
 	context?: ContextUsage;
 	/** The session's `/goal`; absent or null when it has none. */
 	goal?: GoalState | null;
+	/** What the session's plugins put on screen; absent when they put nothing. */
+	extensionUi?: ExtensionUiSnapshot;
 	error?: string;
+}
+
+/**
+ * A question a plugin's extension is waiting on — pi's `ctx.ui.select`,
+ * `confirm`, `input` or `editor`. Only the oldest is shown; the rest queue.
+ */
+export interface ExtensionDialog {
+	id: string;
+	kind: "select" | "confirm" | "input" | "editor";
+	title: string;
+	/** The body of a confirmation. */
+	message?: string;
+	/** A selector's choices, as the extension spelled them. */
+	options?: string[];
+	placeholder?: string;
+	/** What an editor dialog starts out holding. */
+	prefill?: string;
+}
+
+export interface ExtensionUiSnapshot {
+	dialog: ExtensionDialog | null;
+	/** Dialogs waiting behind the one shown. */
+	queued: number;
+	/** `ctx.ui.setStatus` lines, by key, in the order they were first set. */
+	statuses: Array<{ key: string; text: string }>;
+	/** `ctx.ui.setWidget` text blocks; component factories have no DOM to render into. */
+	widgets: Array<{ key: string; lines: string[]; placement: "aboveEditor" | "belowEditor" }>;
+	/** `ctx.ui.setWorkingMessage`, shown while the session streams. */
+	working?: string;
+	/**
+	 * Text an extension put in the composer. The id changes per request, so the
+	 * composer applies each one once and the user's edits afterwards stand.
+	 */
+	editor?: { id: string; text: string; mode: "replace" | "insert" };
+}
+
+export interface ExtensionUiAnswer {
+	/** The {@link ExtensionDialog.id} answered. */
+	id: string;
+	/** Dismissed without an answer: select/input/editor get nothing, confirm gets no. */
+	cancelled?: boolean;
+	/** The chosen option or the text entered. */
+	value?: string;
+	/** A confirmation's answer. */
+	confirmed?: boolean;
 }
 
 export interface OpenSessionRequest {

@@ -37,6 +37,7 @@ import type {
 import type {
 	AgentDefaults,
 	AgentSnapshot,
+	ExtensionUiAnswer,
 	DeleteSessionRequest,
 	ExecutionMode,
 	ForkSessionRequest,
@@ -377,6 +378,8 @@ const api = {
 	agentSetWorkMode: (mode: WorkMode): Promise<AgentSnapshot | null> => ipcRenderer.invoke("agent:setWorkMode", mode),
 	agentAnswerWorkflow: (answer: WorkflowAnswer): Promise<AgentSnapshot> => ipcRenderer.invoke("agent:answerWorkflow", answer),
 	agentCancelTask: (id: string): Promise<AgentSnapshot> => ipcRenderer.invoke("agent:cancelTask", id),
+	agentAnswerExtensionUi: (sessionId: string, answer: ExtensionUiAnswer): Promise<AgentSnapshot | null> =>
+		ipcRenderer.invoke("agent:answerExtensionUi", sessionId, answer),
 	agentSetMode: (mode: ExecutionMode): Promise<AgentSnapshot | null> =>
 		ipcRenderer.invoke("agent:setMode", mode),
 	// Null when the open session goes away (it was deleted).

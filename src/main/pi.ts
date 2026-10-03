@@ -1,3 +1,5 @@
+import { installWindowsFsyncCompat } from "./windows-fsync";
+
 export type PiCodingAgentModule = typeof import("@earendil-works/pi-coding-agent");
 
 let piModulePromise: Promise<PiCodingAgentModule> | null = null;
@@ -12,7 +14,8 @@ let piModulePromise: Promise<PiCodingAgentModule> | null = null;
  * the main process before any session exists.
  */
 export function pi(): Promise<PiCodingAgentModule> {
-	piModulePromise ??= import("@earendil-works/pi-coding-agent");
+	// Before the SDK, so before any plugin it loads has written a file.
+	piModulePromise ??= installWindowsFsyncCompat().then(() => import("@earendil-works/pi-coding-agent"));
 	return piModulePromise;
 }
 

@@ -38,7 +38,12 @@ export interface BrowserElementSelection {
 	selector: string;
 }
 
-export interface ComposerInsertion { id: string; text: string; }
+export interface ComposerInsertion {
+	id: string;
+	text: string;
+	/** Replace the draft instead of appending to it — a plugin's `setEditorText`. */
+	replace?: boolean;
+}
 
 /** Element text is page data, never an instruction or an automatically sent prompt. */
 export function elementSelectionText(element: BrowserElementSelection): string {

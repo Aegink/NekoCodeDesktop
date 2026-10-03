@@ -2,6 +2,7 @@ import type { AgentSession, ModelRuntime } from "@earendil-works/pi-coding-agent
 import type { Automation } from "../../shared/automation";
 import { pi } from "../pi";
 import { createPromptResources } from "../workflow-runtime";
+import { enabledPlugins } from "../plugin-service";
 import { createStatTool } from "../file-tools";
 import { createWebTools, webToolsEnabled } from "../web-tools";
 import { createAstEditTool, createAstGrepTool } from "../ast-tools";
@@ -28,6 +29,8 @@ export interface AutomationRunnerOptions {
 	sessionsDir: string;
 	/** The single runtime instance, so custom providers are registered once. */
 	getModelRuntime: () => Promise<ModelRuntime>;
+	/** Where the enabled plugin set lives; absent loads every configured package. */
+	pluginStatePath?: string;
 }
 
 /**
@@ -65,7 +68,17 @@ export class AutomationRunner {
 				? currentSession.model.provider + "/" + currentSession.model.id
 				: (automation.modelKey ?? undefined),
 		});
-		const resourceLoader = await createPromptResources(automation.cwd, context);
+		const enabled = this.options.pluginStatePath ? enabledPlugins(this.options.pluginStatePath) : undefined;
+		// The same packages the desktop runs, and no trust question: nobody is
+		// there to answer one, so only a decision already saved counts.
+		const resourceLoader = await createPromptResources(
+			automation.cwd,
+			context,
+			false,
+			undefined,
+			undefined,
+			enabled ? { isEnabled: (source) => enabled.has(source) } : undefined,
+		);
 		const { session } = await createAgentSession({
 			resourceLoader,
 			tools: toolsForMode(context()),
@@ -89,6 +102,11 @@ export class AutomationRunner {
 		// Nobody is watching an automation, which is exactly when a block rule
 		// matters most.
 		hookService().attach(session, automation.cwd);
+		// `session_start`, which extensions set themselves up in. No UI: a plugin
+		// asking something gets pi's headless answer — nothing chosen.
+		await session
+			.bindExtensions({ mode: "print", shutdownHandler: () => undefined })
+			.catch((error: unknown) => console.error("Automation plugins failed to start:", error));
 
 		// PI's session owns cancellation; a local AbortController would stop nothing.
 		// Both the caller's signal and the wall-clock ceiling funnel into session.abort().
@@ -128,6 +146,9 @@ export class AutomationRunner {
 		const messages = session.messages;
 		const summary = lastAssistantText(messages) || lastError || failure || "";
 		const sessionFile = sessionManager.getSessionFile() ?? undefined;
+		if (session.extensionRunner.hasHandlers("session_shutdown")) {
+			await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" }).catch(() => undefined);
+		}
 		session.dispose();
 		return {
 			summary: summary.slice(0, SUMMARY_LIMIT),

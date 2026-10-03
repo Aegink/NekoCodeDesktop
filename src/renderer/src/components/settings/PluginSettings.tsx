@@ -14,16 +14,41 @@ import { Spinner } from "../ui/spinner";
 import { MUTED_LABEL_TEXT_CLASS_NAME } from "../../surfaceStyles";
 import { PluginCatalog } from "./PluginCatalog";
 
-const EMPTY: PluginsSnapshot = { plugins: [], errors: [], busy: false };
+const EMPTY: PluginsSnapshot = { plugins: [], local: [], errors: [], busy: false, loaded: false };
+
+const SMALL_MUTED = cn("break-all text-[length:var(--app-font-size-ui-sm,11px)]", MUTED_LABEL_TEXT_CLASS_NAME);
+
+/** What a loaded extension registered: its tools and its slash commands. */
+function Registered({ tools, commands }: { tools: string[]; commands: string[] }) {
+	const { t } = useTranslation();
+	return (
+		<>
+			{tools.length ? (
+				<p className={SMALL_MUTED}>
+					{t("plugins.registeredTools")}: <code>{tools.join(", ")}</code>
+				</p>
+			) : null}
+			{commands.length ? (
+				<p className={SMALL_MUTED}>
+					{t("plugins.registeredCommands")}: <code>{commands.map((name) => "/" + name).join(", ")}</code>
+				</p>
+			) : null}
+			{!tools.length && !commands.length ? <p className={SMALL_MUTED}>{t("plugins.noTools")}</p> : null}
+		</>
+	);
+}
 
 function PluginRow({
 	plugin,
+	loaded,
 	busy,
 	onToggle,
 	onRemove,
 	onUpdate,
 }: {
 	plugin: PluginSummary;
+	/** A session has loaded the enabled packages, so what they register is known. */
+	loaded: boolean;
 	busy: boolean;
 	onToggle: (enabled: boolean) => void;
 	onRemove: () => void;
@@ -71,25 +96,17 @@ function PluginRow({
 					{t("plugins.notInstalled")}
 				</p>
 			) : null}
-			{plugin.tools.length ? (
-				<p
-					className={cn(
-						"break-all text-[length:var(--app-font-size-ui-sm,11px)]",
-						MUTED_LABEL_TEXT_CLASS_NAME,
-					)}
-				>
-					{t("plugins.registeredTools")}: <code>{plugin.tools.join(", ")}</code>
-				</p>
-			) : plugin.installedPath ? (
-				<p
-					className={cn(
-						"text-[length:var(--app-font-size-ui-sm,11px)]",
-						MUTED_LABEL_TEXT_CLASS_NAME,
-					)}
-				>
-					{t("plugins.noTools")}
-				</p>
-			) : null}
+			{!plugin.installedPath ? null : plugin.enabled ? (
+				loaded ? (
+					<Registered tools={plugin.tools} commands={plugin.commands} />
+				) : (
+					<p className={SMALL_MUTED}>{t("plugins.notLoaded")}</p>
+				)
+			) : (
+				// Not loaded, so there is nothing to list: what it registers is only
+				// known by running it, and running it is what enabling decides.
+				<p className={SMALL_MUTED}>{t("plugins.disabledHint")}</p>
+			)}
 			{plugin.error ? (
 				<p className="whitespace-pre-wrap break-all text-[length:var(--app-font-size-ui-sm,11px)] text-destructive">
 					{plugin.error}
@@ -104,9 +121,8 @@ function PluginRow({
  *
  * The two states a row carries are not the same thing: installed is pi's, and
  * lives in its settings so the CLI keeps working on the same packages; enabled
- * is this app's, and is what lets the model call the package's tools. Landing a
- * package on disk is not authorizing it, so a fresh install starts off — and
- * the row shows exactly which tools turning it on would admit.
+ * is this app's, and is what lets the package load and run at all. Landing a
+ * package on disk is not authorizing it, so a fresh install starts off.
  */
 export function PluginSettings() {
 	const { t } = useTranslation();
@@ -302,6 +318,7 @@ export function PluginSettings() {
 							<PluginRow
 								key={plugin.scope + ":" + plugin.source}
 								plugin={plugin}
+								loaded={snapshot.loaded}
 								busy={busy}
 								onToggle={(enabled) =>
 									void act(() =>
@@ -326,6 +343,32 @@ export function PluginSettings() {
 							/>
 						))}
 					</div>
+
+					{snapshot.local.length ? (
+						<div className="flex flex-col gap-2">
+							<div className="flex flex-col gap-0.5">
+								<span className="font-medium">{t("plugins.localTitle")}</span>
+								<span className={SMALL_MUTED}>{t("plugins.localHint")}</span>
+							</div>
+							{snapshot.local.map((extension) => (
+								<div key={extension.scope + ":" + extension.path} className="flex flex-col gap-1 rounded-lg border border-border p-3">
+									<div className="flex items-center gap-2">
+										<span className="min-w-0 flex-1 break-all font-medium">{extension.path}</span>
+										<span
+											className={cn(
+												"shrink-0 rounded-full border border-border/60 px-1.5",
+												"text-[length:var(--app-font-size-ui-sm,11px)]",
+												MUTED_LABEL_TEXT_CLASS_NAME,
+											)}
+										>
+											{t(extension.scope === "project" ? "plugins.scope.project" : "plugins.scope.user")}
+										</span>
+									</div>
+									<Registered tools={extension.tools} commands={extension.commands} />
+								</div>
+							))}
+						</div>
+					) : null}
 
 					{snapshot.errors.length ? (
 						<div className="flex flex-col gap-1">

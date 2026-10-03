@@ -4,6 +4,7 @@ import type { AgentService } from "./agent-service";
 import { DESKTOP_LIMITS, remoteView } from "./agent-remote-view";
 import type {
 	AgentSnapshot,
+	ExtensionUiAnswer,
 	OpenSessionRequest,
 	RenameSessionRequest,
 	SendPromptResult,
@@ -387,6 +388,29 @@ export class TaskManager {
 		// One at a time: a reload resets the core's provider registry, which is
 		// process-wide, and two interleaved resets could each undo the other.
 		for (const agent of [...this.agents]) await agent.reloadContext();
+	}
+
+	/**
+	 * A plugin was installed, removed, updated or toggled through `changed`:
+	 * every other open session reloads its extensions too. In the background and
+	 * one at a time — a reload resets the core's process-wide provider registry,
+	 * and one still running a turn waits for it to end (see `reloadContext`).
+	 */
+	reloadPlugins(changed: AgentService): void {
+		const others = [...this.agents].filter((agent) => agent !== changed);
+		void (async () => {
+			for (const agent of others) {
+				if (this.closed || !this.agents.has(agent)) continue;
+				await agent.reloadContext().catch(() => undefined);
+			}
+		})();
+	}
+
+	/** Route a plugin dialog's answer to the session that asked, on screen or not. */
+	async answerExtensionUi(sessionId: string, answer: ExtensionUiAnswer): Promise<AgentSnapshot | null> {
+		const agent = [...this.snapshots].find(([, snapshot]) => snapshot.session.id === sessionId)?.[0];
+		if (!agent) return null;
+		return this.view(agent.answerExtensionUi(answer));
 	}
 
 	private drop(agent: AgentService): void {

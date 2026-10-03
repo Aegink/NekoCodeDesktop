@@ -8,14 +8,17 @@ import type {
 	AgentDefaults,
 	AgentSnapshot,
 	ExecutionMode,
+	ExtensionUiAnswer,
 	SendPromptRequest,
 	ThinkingLevel,
 } from "../../../shared/agent";
+import { api } from "../api";
 import { useTranslation } from "../i18n";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Spinner } from "./ui/spinner";
 import { WorkflowPanel } from "./chat/WorkflowPanel";
+import { ExtensionPanel, ExtensionWidgetsBelow } from "./chat/ExtensionPanel";
 import { GoalBanner } from "./chat/GoalBanner";
 import { readGoalState, type GoalAction } from "../../../shared/goal";
 import { WorktreeBar } from "./chat/WorktreeBar";
@@ -89,6 +92,11 @@ interface ChatViewProps {
 	/** `@` candidates; absent on the phone, which has no picker for the desktop's files. */
 	loadMentions?: (query: string) => Promise<MentionCandidate[]>;
 	onAnswerWorkflow?: (answer: WorkflowAnswer) => Promise<unknown>;
+	/**
+	 * Answer a plugin's dialog. Defaults to the desktop bridge, addressed by the
+	 * session shown; a surface without one leaves the dialog for the desktop.
+	 */
+	onAnswerExtensionUi?: (answer: ExtensionUiAnswer) => Promise<unknown>;
 	onCancelWorker?: (id: string) => Promise<unknown>;
 	insertion?: ComposerInsertion | null;
 	onInsertionConsumed?: (id: string) => void;
@@ -370,6 +378,16 @@ export function ChatView(props: ChatViewProps) {
 	// or an older desktop feeding the WebUI — sends a goal without the fields
 	// this banner reads, and one missing field must not take the window down.
 	const goal = readGoalState(snapshot.goal);
+	// Addressed by session rather than sent to "the active one": in a split view
+	// the dialog may belong to a pane that is not focused.
+	const sessionId = snapshot.session.id;
+	const answerExtensionUi =
+		props.onAnswerExtensionUi ??
+		(props.mobile ? undefined : (answer: ExtensionUiAnswer) => api.agentAnswerExtensionUi(sessionId, answer));
+	const extensionEditor = snapshot.extensionUi?.editor;
+	const extensionInsertion: ComposerInsertion | null = extensionEditor
+		? { id: extensionEditor.id, text: extensionEditor.text, replace: extensionEditor.mode === "replace" }
+		: null;
 	const compact = props.compactHeader === true;
 	const actionLabel = (label: string) => (compact ? { title: label, "aria-label": label } : {});
 
@@ -508,12 +526,18 @@ export function ChatView(props: ChatViewProps) {
 
 			{goal && props.onGoalAction ? <GoalBanner goal={goal} onAction={props.onGoalAction} /> : null}
 			<WorkflowPanel workflow={snapshot.workflow} onOpenTask={props.onOpenTask} onAnswer={props.onAnswerWorkflow} onCancelWorker={props.onCancelWorker} />
+			<ExtensionPanel ui={snapshot.extensionUi} streaming={snapshot.streaming} onAnswer={answerExtensionUi} />
 			<Composer
 				header={props.composerHeader}
 				loadCommands={props.loadCommands}
 				loadMentions={props.loadMentions}
-				insertion={props.insertion}
-				onInsertionConsumed={props.onInsertionConsumed}
+				insertion={props.insertion ?? extensionInsertion}
+				onInsertionConsumed={(id) => {
+					// Told back to the session, which then stops offering the text: a
+					// second surface showing it must not apply the same request again.
+					if (id === extensionEditor?.id) void answerExtensionUi?.({ id }).catch(() => undefined);
+					else props.onInsertionConsumed?.(id);
+				}}
 				disabled={busy || !!snapshot.workflow.request}
 				streaming={
 					snapshot.streaming || snapshot.workflow.tasks.some((task) => task.status === "running")
@@ -537,6 +561,7 @@ export function ChatView(props: ChatViewProps) {
 				onSetMode={props.onSetMode}
 				onSetWorkMode={props.onSetWorkMode}
 			/>
+			<ExtensionWidgetsBelow ui={snapshot.extensionUi} />
 		</div>
 	);
 }

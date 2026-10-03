@@ -24,6 +24,7 @@ import type { TaskBoardEntry } from "../../shared/task-board";
 import type {
 	AgentDefaults,
 	AgentSnapshot,
+	ExtensionUiAnswer,
 	DeleteSessionRequest,
 	ExecutionMode,
 	ForkSessionRequest,
@@ -357,6 +358,8 @@ export interface AgentApi {
 	agentSetWorkMode(mode: WorkMode): Promise<AgentSnapshot | null>;
 	agentAnswerWorkflow(answer: WorkflowAnswer): Promise<AgentSnapshot>;
 	agentCancelTask(id: string): Promise<AgentSnapshot>;
+	/** Answer a plugin's dialog in whichever session asked, on screen or in a pane. */
+	agentAnswerExtensionUi(sessionId: string, answer: ExtensionUiAnswer): Promise<AgentSnapshot | null>;
 	onAgentSnapshot(listener: (snapshot: AgentSnapshot | null) => void): () => void;
 
 	/** Checkpoints for the open session, newest first. Also carried on every snapshot. */

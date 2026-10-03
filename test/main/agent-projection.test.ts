@@ -1,0 +1,76 @@
+import { describe, expect, test } from "bun:test";
+import { CellProjector, projectMessages, type ProjectableMessage } from "../../src/main/agent-projection";
+
+describe("errored replies", () => {
+	const failed: ProjectableMessage = {
+		role: "assistant",
+		stopReason: "error",
+		errorMessage: "Connection error.",
+		content: [{ type: "toolCall", id: "t1", name: "read", arguments: {} }],
+		timestamp: 2,
+	};
+	const user = (timestamp: number): ProjectableMessage => ({ role: "user", content: "hi", timestamp });
+	const ok: ProjectableMessage = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "hello" }], timestamp: 4 };
+
+	test("stay visible while nothing has succeeded since", () => {
+		const cells = projectMessages([user(1), failed]);
+		expect(cells.find((c) => c.type === "assistant")).toMatchObject({ error: "Connection error." });
+		expect(cells.find((c) => c.type === "tool")).toMatchObject({ status: "error" });
+	});
+
+	test("disappear once a later call gets through", () => {
+		const cells = projectMessages([user(1), failed, user(3), ok]);
+		expect(cells.map((c) => c.type)).toEqual(["user", "user", "assistant"]);
+		expect(cells.some((c) => c.type === "assistant" && c.error)).toBe(false);
+	});
+
+	test("aborted replies are kept", () => {
+		const aborted: ProjectableMessage = { ...failed, stopReason: "aborted", content: [] };
+		const cells = projectMessages([user(1), aborted, user(3), ok]);
+		expect(cells.some((c) => c.type === "assistant" && c.error === "Connection error.")).toBe(true);
+	});
+});
+
+function notices(projector: CellProjector) {
+	return projector.cells().filter((c) => c.type === "notice").map((c) => (c.type === "notice" ? c.text : ""));
+}
+
+describe("auto-retry notices", () => {
+	const start = (attempt: number) =>
+		({ type: "auto_retry_start", attempt, maxAttempts: 3, delayMs: 0, errorMessage: "Connection error." }) as const;
+
+	test("each attempt replaces the last, and a successful retry clears it", () => {
+		const projector = new CellProjector();
+		projector.handleEvent(start(1));
+		projector.handleEvent(start(2));
+		expect(notices(projector)).toEqual(["Retrying (2/3): Connection error."]);
+		projector.handleEvent({ type: "auto_retry_end", success: true, attempt: 2 });
+		expect(notices(projector)).toEqual([]);
+	});
+
+	test("a failed retry leaves only the final error", () => {
+		const projector = new CellProjector();
+		projector.handleEvent(start(3));
+		projector.handleEvent({ type: "auto_retry_end", success: false, attempt: 3, finalError: "Connection error." });
+		expect(notices(projector)).toEqual(["Connection error."]);
+	});
+
+	test("a failed retry clears once a later call gets through", () => {
+		const projector = new CellProjector();
+		projector.handleEvent(start(3));
+		projector.handleEvent({ type: "auto_retry_end", success: false, attempt: 3, finalError: "Connection error." });
+		projector.handleEvent({
+			type: "message_end",
+			message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "hi" }], timestamp: 5 },
+		});
+		expect(notices(projector)).toEqual([]);
+	});
+
+	test("other notices are left alone", () => {
+		const projector = new CellProjector();
+		projector.notice("info", "hello");
+		projector.handleEvent(start(1));
+		projector.handleEvent({ type: "auto_retry_end", success: true, attempt: 1 });
+		expect(notices(projector)).toEqual(["hello"]);
+	});
+});

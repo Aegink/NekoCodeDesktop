@@ -79,6 +79,7 @@ import type {
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ExtensionUiAnswer,
 	ForkSessionRequest,
 	OpenSessionRequest,
 	RenameSessionRequest,
@@ -1461,15 +1462,27 @@ function registerIpc(): void {
 	const pluginCatalog = new PluginCatalogService();
 	ipcMain.handle("plugins:catalog", (_event, query: PluginCatalogQuery) => pluginCatalog.list(query));
 	ipcMain.handle("plugins:list", () => taskManager?.active.pluginsSnapshot());
+	/** Run a plugin change in the session on screen, then bring every other open one up to date. */
+	const pluginChange = async <T>(action: (agent: AgentService) => Promise<T>): Promise<T | undefined> => {
+		const manager = taskManager;
+		if (!manager) return undefined;
+		const agent = manager.active;
+		const result = await action(agent);
+		manager.reloadPlugins(agent);
+		return result;
+	};
 	ipcMain.handle("plugins:install", (_e, request: InstallPluginRequest) =>
-		taskManager?.active.installPlugin(request),
+		pluginChange((agent) => agent.installPlugin(request)),
 	);
 	ipcMain.handle("plugins:remove", (_e, request: PluginActionRequest) =>
-		taskManager?.active.removePlugin(request),
+		pluginChange((agent) => agent.removePlugin(request)),
 	);
-	ipcMain.handle("plugins:update", (_e, source?: string) => taskManager?.active.updatePlugin(source));
+	ipcMain.handle("plugins:update", (_e, source?: string) => pluginChange((agent) => agent.updatePlugin(source)));
 	ipcMain.handle("plugins:setEnabled", (_e, request: SetPluginEnabledRequest) =>
-		taskManager?.active.setPluginEnabled(request),
+		pluginChange((agent) => agent.setPluginEnabled(request)),
+	);
+	ipcMain.handle("agent:answerExtensionUi", (_e, sessionId: string, answer: ExtensionUiAnswer) =>
+		taskManager?.answerExtensionUi(sessionId, answer) ?? null,
 	);
 	ipcMain.handle("agent:setMode", (_e, mode: ExecutionMode) =>
 		toWindow(taskManager?.active.setMode(mode)),

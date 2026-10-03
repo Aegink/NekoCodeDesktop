@@ -14,7 +14,9 @@ export type SlashCommandKind =
 	/** A markdown prompt template from `prompts/`; invoked as `/<name>`. */
 	| "prompt"
 	/** One of the app's own commands, like `/init`; handled in main before the core sees it. */
-	| "builtin";
+	| "builtin"
+	/** Registered by a pi plugin's extension; the core runs its handler instead of prompting. */
+	| "extension";
 
 export interface SlashCommandSummary {
 	/** What follows the slash — `skill:design` or `review`. Unique per list. */

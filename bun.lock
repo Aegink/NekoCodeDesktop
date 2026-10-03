@@ -17,45 +17,32 @@
         "@ast-grep/lang-rust": "0.0.7",
         "@ast-grep/lang-yaml": "0.0.6",
         "@ast-grep/napi": "0.45.3",
-        "@base-ui/react": "^1.5.0",
-        "@capacitor/android": "8.5.2",
-        "@capacitor/app": "8",
-        "@capacitor/barcode-scanner": "3.1.2",
-        "@capacitor/core": "8.5.2",
-        "@capacitor/ios": "8.5.2",
-        "@capacitor/preferences": "8",
-        "@earendil-works/pi-agent-core": "workspace:0.99.1",
-        "@earendil-works/pi-ai": "workspace:0.99.1",
-        "@earendil-works/pi-coding-agent": "workspace:0.99.1",
-        "@tabler/icons-react": "^3.44.0",
+        "@earendil-works/pi-agent-core": "workspace:1.0.0",
+        "@earendil-works/pi-ai": "workspace:1.0.0",
+        "@earendil-works/pi-coding-agent": "workspace:1.0.0",
+        "@earendil-works/pi-mcp": "workspace:1.0.0",
         "@tencent-connect/qqbot-nodejs": "^1.0.4",
         "@trycua/cua-driver": "0.28.2",
-        "@xterm/addon-fit": "0.11.0",
-        "@xterm/xterm": "6.0.0",
-        "border-beam": "^1.3.0",
         "cheerio": "^1.2.0",
-        "class-variance-authority": "^0.7.1",
         "koffi": "3.3.1",
-        "monaco-editor": "^0.57.0",
         "node-pty": "1.1.0",
-        "qrcode.react": "4.2.0",
-        "react": "^19.3.0",
-        "react-dom": "^19.3.0",
-        "react-icons": "^5.6.0",
-        "react-markdown": "^10.1.0",
-        "remark-gfm": "^4.0.1",
         "shiki": "^4.4.3",
         "ssh2": "^1.16.0",
-        "tailwind-merge": "^3.6.0",
-        "thinking-orbs": "^0.3.1",
         "typebox": "1.3.27",
         "undici": "^8.10.2",
         "unpdf": "^1.8.1",
         "vscode-oniguruma": "^2.0.1",
-        "vscode-textmate": "^9.3.2",
       },
       "devDependencies": {
+        "@base-ui/react": "^1.5.0",
+        "@capacitor/android": "8.5.2",
+        "@capacitor/app": "8",
+        "@capacitor/barcode-scanner": "3.1.2",
         "@capacitor/cli": "8.5.2",
+        "@capacitor/core": "8.5.2",
+        "@capacitor/ios": "8.5.2",
+        "@capacitor/preferences": "8",
+        "@tabler/icons-react": "^3.44.0",
         "@tailwindcss/vite": "^4.0.0",
         "@types/node": "^24.10.13",
         "@types/react": "^19.3.0",
@@ -63,45 +50,53 @@
         "@types/ssh2": "^1.15.6",
         "@typescript/native-preview": "7.0.0-dev.20260120.1",
         "@vitejs/plugin-react": "^6.1.1",
+        "@xterm/addon-fit": "0.11.0",
+        "@xterm/xterm": "6.0.0",
+        "border-beam": "^1.3.0",
         "bun-types": "1.4.2",
+        "class-variance-authority": "^0.7.1",
         "electron": "44.3.0",
         "electron-builder": "26.15.3",
         "electron-vite": "^5.0.0",
         "esbuild": "0.28.2",
+        "monaco-editor": "^0.57.0",
+        "qrcode.react": "4.2.0",
+        "react": "^19.3.0",
+        "react-dom": "^19.3.0",
+        "react-icons": "^5.6.0",
+        "react-markdown": "^10.1.0",
+        "remark-gfm": "^4.0.1",
         "shx": "0.4.0",
+        "tailwind-merge": "^3.6.0",
         "tailwindcss": "^4.0.0",
+        "thinking-orbs": "^0.3.1",
         "typescript": "^7.0.2",
         "vite": "^8.3.0",
+        "vscode-textmate": "^9.3.2",
       },
     },
     "pi/packages/agent": {
       "name": "@earendil-works/pi-agent-core",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
-        "@earendil-works/pi-ai": "^0.99.1",
-        "@earendil-works/pi-telemetry": "^0.99.1",
-        "diff": "8.0.4",
-        "ignore": "7.0.8",
+        "@earendil-works/pi-ai": "^1.0.0",
         "typebox": "1.3.27",
-        "yaml": "2.9.0",
       },
       "devDependencies": {
         "@types/node": "22.19.19",
-        "@vitest/coverage-v8": "4.1.11",
         "vitest": "4.1.11",
       },
     },
     "pi/packages/ai": {
       "name": "@earendil-works/pi-ai",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "bin": {
         "pi-ai": "dist/cli.js",
       },
       "dependencies": {
-        "@anthropic-ai/sdk": "0.124.0",
+        "@anthropic-ai/sdk": "0.129.0",
         "@aws-sdk/client-bedrock-runtime": "3.1127.0",
-        "@earendil-works/pi-telemetry": "^0.99.1",
+        "@earendil-works/pi-telemetry": "^1.0.0",
         "@google/genai": "2.21.0",
         "@smithy/node-http-handler": "4.12.1",
         "@smithy/types": "4.18.0",
@@ -119,7 +114,7 @@
     },
     "pi/packages/chord": {
       "name": "@earendil-works/chord",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
         "esbuild": "0.28.2",
       },
@@ -130,10 +125,10 @@
     },
     "pi/packages/client": {
       "name": "@earendil-works/pi-client",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
-        "@earendil-works/pi-protocol": "^0.99.1",
+        "@earendil-works/chord": "^1.0.0",
+        "@earendil-works/pi-protocol": "^1.0.0",
       },
       "devDependencies": {
         "shx": "0.4.0",
@@ -142,7 +137,7 @@
     },
     "pi/packages/codemode": {
       "name": "@earendil-works/pi-codemode",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
         "quickjs-wasi": "3.6.2",
       },
@@ -153,18 +148,19 @@
     },
     "pi/packages/coding-agent": {
       "name": "@earendil-works/pi-coding-agent",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "bin": {
         "pi": "dist/bundle/cli.js",
       },
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
-        "@earendil-works/pi-agent-core": "^0.99.1",
-        "@earendil-works/pi-ai": "^0.99.1",
-        "@earendil-works/pi-codemode": "^0.99.1",
-        "@earendil-works/pi-mcp": "^0.99.1",
-        "@earendil-works/pi-tui": "^0.99.1",
+        "@earendil-works/chord": "^1.0.0",
+        "@earendil-works/pi-agent-core": "^1.0.0",
+        "@earendil-works/pi-ai": "^1.0.0",
+        "@earendil-works/pi-codemode": "^1.0.0",
+        "@earendil-works/pi-mcp": "^1.0.0",
+        "@earendil-works/pi-tui": "^1.0.0",
         "@silvia-odwyer/photon-node": "0.3.4",
+        "brace-expansion": "5.0.12",
         "chalk": "6.0.0",
         "cross-spawn": "7.0.6",
         "diff": "8.0.4",
@@ -182,9 +178,9 @@
         "yaml": "2.9.0",
       },
       "devDependencies": {
-        "@earendil-works/pi-client": "^0.99.1",
-        "@earendil-works/pi-protocol": "^0.99.1",
-        "@earendil-works/pi-server": "^0.99.1",
+        "@earendil-works/pi-client": "^1.0.0",
+        "@earendil-works/pi-protocol": "^1.0.0",
+        "@earendil-works/pi-server": "^1.0.0",
         "@types/cross-spawn": "6.0.6",
         "@types/hosted-git-info": "3.0.5",
         "@types/node": "22.19.19",
@@ -197,10 +193,12 @@
     },
     "pi/packages/durable": {
       "name": "@earendil-works/pi-durable",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
-        "@earendil-works/pi-ai": "^0.99.1",
+        "@earendil-works/chord": "^1.0.0",
+        "@earendil-works/pi-ai": "^1.0.0",
+        "diff": "8.0.4",
+        "typebox": "1.3.27",
       },
       "devDependencies": {
         "shx": "0.4.0",
@@ -209,7 +207,7 @@
     },
     "pi/packages/evals": {
       "name": "@earendil-works/pi-evals",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "devDependencies": {
         "@earendil-works/pi-ai": "^0.99.1",
         "@earendil-works/pi-coding-agent": "^0.99.1",
@@ -223,7 +221,7 @@
     },
     "pi/packages/mcp": {
       "name": "@earendil-works/pi-mcp",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
         "cross-spawn": "7.0.6",
       },
@@ -235,9 +233,9 @@
     },
     "pi/packages/protocol": {
       "name": "@earendil-works/pi-protocol",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
+        "@earendil-works/chord": "^1.0.0",
         "typebox": "1.3.27",
       },
       "devDependencies": {
@@ -247,32 +245,19 @@
     },
     "pi/packages/server": {
       "name": "@earendil-works/pi-server",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
-        "@earendil-works/chord": "^0.99.1",
-        "@earendil-works/pi-agent-core": "^0.99.1",
-        "@earendil-works/pi-protocol": "^0.99.1",
+        "@earendil-works/chord": "^1.0.0",
+        "@earendil-works/pi-protocol": "^1.0.0",
       },
       "devDependencies": {
         "shx": "0.4.0",
         "vitest": "4.1.11",
       },
     },
-    "pi/packages/session-backends/sqlite-node": {
-      "name": "@earendil-works/pi-session-backend-sqlite-node",
-      "version": "0.99.1",
-      "dependencies": {
-        "@earendil-works/pi-agent-core": "^0.99.1",
-        "@earendil-works/pi-ai": "^0.99.1",
-      },
-      "devDependencies": {
-        "@vitest/coverage-v8": "4.1.11",
-        "vitest": "4.1.11",
-      },
-    },
     "pi/packages/telemetry": {
       "name": "@earendil-works/pi-telemetry",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "devDependencies": {
         "@types/node": "22.19.19",
         "vitest": "4.1.11",
@@ -280,7 +265,7 @@
     },
     "pi/packages/tui": {
       "name": "@earendil-works/pi-tui",
-      "version": "0.99.1",
+      "version": "1.0.0",
       "dependencies": {
         "get-east-asian-width": "1.6.0",
         "marked": "18.0.11",
@@ -323,7 +308,7 @@
 
     "@anthropic-ai/claude-agent-sdk-win32-x64": ["@anthropic-ai/claude-agent-sdk-win32-x64@0.3.280", "", { "os": "win32", "cpu": "x64" }, "sha512-N+Y1zJb19nx0oPTvzkl/E3ng9AtWGW+K4hySmSHCgYSsgIwfs1YzDj/F5eHDMrxgklTuzFp76TvL3S75z5ge+g=="],
 
-    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.124.0", "https://registry.npmmirror.com/@anthropic-ai/sdk/-/sdk-0.124.0.tgz", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-cN5O8i9UVxHeOQAzj/XjshWXG8KiibJDw9OGpH2Z/eR3n/RBxdoLxDJOcfqAJWvjaMDFfHTBADU04hWRJVkDyA=="],
+    "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.129.0", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-MH7LB20kNpGLUpPTe2OG5XvL/KhX8HUO9XyBaFjgFk6TLS4Xjt0VPIuMKywe7POKKPslX+QxSlVok9e+8kG5Nw=="],
 
     "@ast-grep/lang-bash": ["@ast-grep/lang-bash@0.0.8", "", { "dependencies": { "@ast-grep/setup-lang": "0.0.6" }, "peerDependencies": { "tree-sitter-cli": "0.25.8" }, "optionalPeers": ["tree-sitter-cli"] }, "sha512-qFykSsOdBv35I1rtt2PstJ4luzV9J1YCiFZBgySI8UPOh+TFnmpdlq9CrryNOj0Q7f6zZhc1OIau+/mUSs6HAg=="],
 
@@ -445,8 +430,6 @@
 
     "@base-ui/utils": ["@base-ui/utils@0.4.0", "https://registry.npmmirror.com/@base-ui/utils/-/utils-0.4.0.tgz", { "dependencies": { "@babel/runtime": "^7.29.7", "@floating-ui/utils": "^0.2.12", "reselect": "^5.2.0", "use-sync-external-store": "^1.6.0" }, "peerDependencies": { "@types/react": "^17 || ^18 || ^19", "react": "^17 || ^18 || ^19", "react-dom": "^17 || ^18 || ^19" }, "optionalPeers": ["@types/react"] }, "sha512-bO9fz25kKtPf+aZVyfQrC0PDmJdmVni31W2hCS5/Owb+inwdIL3XU26pCPRPlt4LSxZrBgLwubXQXQlKaFEZzw=="],
 
-    "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "https://registry.npmmirror.com/@bcoe/v8-coverage/-/v8-coverage-1.0.2.tgz", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
-
     "@capacitor/android": ["@capacitor/android@8.5.2", "", { "peerDependencies": { "@capacitor/core": "^8.5.0" } }, "sha512-rtiaz78egCcS+vs29wkWCL3C+RhazKMSygXcjutwWP8NmO6r5UBxOvGf3Wjz5+ahobyQ723tn9gCePwRwcNDZQ=="],
 
     "@capacitor/app": ["@capacitor/app@8.1.1", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-xM2ZTX5jK60tFtmjsmJv+Cdj1Qsb6NcavkqmdEnCPQBeya9oKhamZJxYOnQNj1ZvcJM7sWfG6BEtSLx42pisbA=="],
@@ -482,8 +465,6 @@
     "@earendil-works/pi-protocol": ["@earendil-works/pi-protocol@workspace:pi/packages/protocol"],
 
     "@earendil-works/pi-server": ["@earendil-works/pi-server@workspace:pi/packages/server"],
-
-    "@earendil-works/pi-session-backend-sqlite-node": ["@earendil-works/pi-session-backend-sqlite-node@workspace:pi/packages/session-backends/sqlite-node"],
 
     "@earendil-works/pi-telemetry": ["@earendil-works/pi-telemetry@workspace:pi/packages/telemetry"],
 
@@ -949,8 +930,6 @@
 
     "@vitest-evals/report-ui": ["@vitest-evals/report-ui@0.15.0", "https://registry.npmmirror.com/@vitest-evals/report-ui/-/report-ui-0.15.0.tgz", { "dependencies": { "@vitest-evals/core": "0.15.0" } }, "sha512-icrutiRhZ2T1MrHo2RW09hcEwfi/tV/FgsGAE76Wd0C02tZyCleQRjt11RWhBJiYDPpsjjjTHGCHIO6tmtX5zQ=="],
 
-    "@vitest/coverage-v8": ["@vitest/coverage-v8@4.1.11", "", { "dependencies": { "@bcoe/v8-coverage": "^1.0.2", "@vitest/utils": "4.1.11", "ast-v8-to-istanbul": "^1.0.0", "istanbul-lib-coverage": "^3.2.2", "istanbul-lib-report": "^3.0.1", "istanbul-reports": "^3.2.0", "magicast": "^0.5.2", "obug": "^2.1.1", "std-env": "^4.0.0-rc.1", "tinyrainbow": "^3.1.0" }, "peerDependencies": { "@vitest/browser": "4.1.11", "vitest": "4.1.11" }, "optionalPeers": ["@vitest/browser"] }, "sha512-8MVGEFnJIcdGjcbfKmeq8z0pZHH0JlVtoVZH9Q/qwUp6wyFnEJUBMrw9DCaj+ra3vShGmhavjalMIhPNxZAUcw=="],
-
     "@vitest/expect": ["@vitest/expect@4.1.11", "", { "dependencies": { "@standard-schema/spec": "^1.1.0", "@types/chai": "^5.2.2", "@vitest/spy": "4.1.11", "@vitest/utils": "4.1.11", "chai": "^6.2.2", "tinyrainbow": "^3.1.0" } }, "sha512-VX2x5vNJXET47KAFzwERI+KRMtTTCSWTfSMKsW7JsUsXV4psq++e3DvZpuTDOpHcxytiDs6p2nhVb2tVDiiUYw=="],
 
     "@vitest/mocker": ["@vitest/mocker@4.1.11", "", { "dependencies": { "@vitest/spy": "4.1.11", "estree-walker": "^3.0.3", "magic-string": "^0.30.21" }, "peerDependencies": { "msw": "^2.4.9", "vite": "^6.0.0 || ^7.0.0 || ^8.0.0" }, "optionalPeers": ["msw", "vite"] }, "sha512-2XJVD55d1o5AZous5CCGKS74g/riOj9odEt2bQpCVZeblHyHdnMeFl4jl0XjU21stf4mbjUkew2eXQZt65g5CQ=="],
@@ -996,8 +975,6 @@
     "asn1js": ["asn1js@3.0.10", "", { "dependencies": { "pvtsutils": "^1.3.6", "pvutils": "^1.1.5", "tslib": "^2.8.1" } }, "sha512-S2s3aOytiKdFRdulw2qPE51MzjzVOisppcVv7jVFR+Kw0kxwvFrDcYA0h7Ndqbmj0HkMIXYWaoj7fli8kgx1eg=="],
 
     "assertion-error": ["assertion-error@2.0.1", "https://registry.npmmirror.com/assertion-error/-/assertion-error-2.0.1.tgz", {}, "sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA=="],
-
-    "ast-v8-to-istanbul": ["ast-v8-to-istanbul@1.0.6", "https://registry.npmmirror.com/ast-v8-to-istanbul/-/ast-v8-to-istanbul-1.0.6.tgz", { "dependencies": { "@jridgewell/trace-mapping": "^0.3.31", "estree-walker": "^3.0.3", "js-tokens": "^10.0.0" } }, "sha512-fvpl29helSO2w/z7utIbrkNXILdrLwDwAMH2I/zPKlGf5244+gf+B4cyS1sANcrPY2h+hWCGSgC8N61s/+AF9A=="],
 
     "astral-regex": ["astral-regex@2.0.0", "", {}, "sha512-Z7tMw1ytTXt5jqMcOP+OQteU1VuNK9Y02uuJtKQ1Sv69jXQKKg5cibLwGJow8yzZP+eAc18EmLGPal0bp36rvQ=="],
 
@@ -1411,8 +1388,6 @@
 
     "hosted-git-info": ["hosted-git-info@9.0.3", "https://registry.npmmirror.com/hosted-git-info/-/hosted-git-info-9.0.3.tgz", { "dependencies": { "lru-cache": "^11.1.0" } }, "sha512-Hc+ghLoSt6QaYZUv0WBiIvmMDZuZZ7oaDvdH8MbfOO4lOsxdXLEvuC6ePoGs9H1X9oCLyq6+NVN0MKqD+ydxyg=="],
 
-    "html-escaper": ["html-escaper@2.0.2", "https://registry.npmmirror.com/html-escaper/-/html-escaper-2.0.2.tgz", {}, "sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg=="],
-
     "html-url-attributes": ["html-url-attributes@3.0.1", "https://registry.npmmirror.com/html-url-attributes/-/html-url-attributes-3.0.1.tgz", {}, "sha512-ol6UPyBWqsrO6EJySPz2O7ZSr856WDrEzM5zMqp+FJJLGMW35cLYmmZnl0vztAZxRUoNZJFTCohfjuIJ8I4QBQ=="],
 
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
@@ -1491,12 +1466,6 @@
 
     "isexe": ["isexe@2.0.0", "https://registry.npmmirror.com/isexe/-/isexe-2.0.0.tgz", {}, "sha512-RHxMLp9lnKHGHRng9QFhRCMbYAcVpn69smSGcq3f36xjgVVWThj4qqLbTLlq7Ssj8B+fIQ1EuCEGI2lKsyQeIw=="],
 
-    "istanbul-lib-coverage": ["istanbul-lib-coverage@3.2.2", "https://registry.npmmirror.com/istanbul-lib-coverage/-/istanbul-lib-coverage-3.2.2.tgz", {}, "sha512-O8dpsF+r0WV/8MNRKfnmrtCWhuKjxrq2w+jpzBL5UZKTi2LeVWnWOmWRxFlesJONmc+wLAGvKQZEOanko0LFTg=="],
-
-    "istanbul-lib-report": ["istanbul-lib-report@3.0.1", "https://registry.npmmirror.com/istanbul-lib-report/-/istanbul-lib-report-3.0.1.tgz", { "dependencies": { "istanbul-lib-coverage": "^3.0.0", "make-dir": "^4.0.0", "supports-color": "^7.1.0" } }, "sha512-GCfE1mtsHGOELCU8e/Z7YWzpmybrx/+dSTfLrvY8qRmaY6zXTKWn6WQIjaAFw069icm6GVMNkgu0NzI4iPZUNw=="],
-
-    "istanbul-reports": ["istanbul-reports@3.2.0", "https://registry.npmmirror.com/istanbul-reports/-/istanbul-reports-3.2.0.tgz", { "dependencies": { "html-escaper": "^2.0.0", "istanbul-lib-report": "^3.0.0" } }, "sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA=="],
-
     "jake": ["jake@10.9.4", "", { "dependencies": { "async": "^3.2.6", "filelist": "^1.0.4", "picocolors": "^1.1.1" }, "bin": { "jake": "bin/cli.js" } }, "sha512-wpHYzhxiVQL+IV05BLE2Xn34zW1S223hvjtqk0+gsPrwd/8JNLXJgZZM/iPFsYc1xyphF+6M6EvdE5E9MBGkDA=="],
 
     "jiti": ["jiti@2.7.0", "https://registry.npmmirror.com/jiti/-/jiti-2.7.0.tgz", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
@@ -1505,7 +1474,7 @@
 
     "js-levenshtein": ["js-levenshtein@1.1.6", "", {}, "sha512-X2BB11YZtrRqY4EnQcLX5Rh373zbK4alC1FW7D7MBhL2gtcC17cTnr6DmfHZeS0s2rTHjUTMMHfG7gO8SSdw+g=="],
 
-    "js-tokens": ["js-tokens@10.0.0", "https://registry.npmmirror.com/js-tokens/-/js-tokens-10.0.0.tgz", {}, "sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q=="],
+    "js-tokens": ["js-tokens@4.0.0", "https://registry.npmmirror.com/js-tokens/-/js-tokens-4.0.0.tgz", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 
     "js-yaml": ["js-yaml@4.3.2", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.js" } }, "sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA=="],
 
@@ -1576,10 +1545,6 @@
     "lru-cache": ["lru-cache@11.5.2", "https://registry.npmmirror.com/lru-cache/-/lru-cache-11.5.2.tgz", {}, "sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g=="],
 
     "magic-string": ["magic-string@0.30.21", "https://registry.npmmirror.com/magic-string/-/magic-string-0.30.21.tgz", { "dependencies": { "@jridgewell/sourcemap-codec": "^1.5.5" } }, "sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ=="],
-
-    "magicast": ["magicast@0.5.5", "https://registry.npmmirror.com/magicast/-/magicast-0.5.5.tgz", { "dependencies": { "@babel/parser": "^7.29.7", "@babel/types": "^7.29.7", "source-map-js": "^1.2.1" } }, "sha512-UicdXN8zQ3JHlxVq+28afMXPr1z7WNY6+7EJnzTdQWkTAlMLF5fNCCKxJHBQwGaNGR11581EiQmQzx73+MvszA=="],
-
-    "make-dir": ["make-dir@4.0.0", "https://registry.npmmirror.com/make-dir/-/make-dir-4.0.0.tgz", { "dependencies": { "semver": "^7.5.3" } }, "sha512-hXdUTZYIVOt1Ex//jAQi+wTZZpUpwBj/0QsOzqegb3rGMMeJiSEu5xLHnYfBrRV4RH2+OCSOO95Is/7x1WJ4bw=="],
 
     "markdown-table": ["markdown-table@3.0.4", "https://registry.npmmirror.com/markdown-table/-/markdown-table-3.0.4.tgz", {}, "sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw=="],
 
@@ -2210,8 +2175,6 @@
     "@agentclientprotocol/codex-acp/open": ["open@11.0.4", "", { "dependencies": { "default-browser": "^5.5.1", "define-lazy-prop": "^3.0.0", "is-in-ssh": "^1.0.0", "is-inside-container": "^1.0.0", "powershell-utils": "^0.2.1", "wsl-utils": "^1.0.0" } }, "sha512-++Zlftm0kVLPmzC06t6epuWmcRMDbI4z5P3NNX979WA/k23+NtSOynEGzsVfZwguKw2mi5umVgnBlJQMwRz4Pg=="],
 
     "@aws-sdk/credential-provider-sso/@aws-sdk/token-providers": ["@aws-sdk/token-providers@3.1129.0", "https://registry.npmmirror.com/@aws-sdk/token-providers/-/token-providers-3.1129.0.tgz", { "dependencies": { "@aws-sdk/core": "^3.978.0", "@aws-sdk/nested-clients": "^3.997.45", "@aws-sdk/types": "^3.974.5", "@smithy/core": "^3.33.3", "@smithy/types": "^4.17.2", "tslib": "^2.6.2" } }, "sha512-Sbl3rpzQdsG4ZK2zh0JWUYyZPKKorJlVOddA2T0DVbKJFrsW8J6wgnslxxUH04+WaBMr4A1HzJZvZX0xUvkniA=="],
-
-    "@babel/code-frame/js-tokens": ["js-tokens@4.0.0", "https://registry.npmmirror.com/js-tokens/-/js-tokens-4.0.0.tgz", {}, "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="],
 
     "@babel/core/semver": ["semver@6.3.1", "https://registry.npmmirror.com/semver/-/semver-6.3.1.tgz", { "bin": { "semver": "bin/semver.js" } }, "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA=="],
 

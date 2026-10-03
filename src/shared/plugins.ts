@@ -54,21 +54,41 @@ export interface PluginSummary {
 	/** Absent when the source is configured but not yet installed on disk. */
 	installedPath?: string;
 	/**
-	 * Whether this package's tools may be called.
+	 * Whether this package may run.
 	 *
-	 * Separate from installed: a package's extensions load and register their
-	 * tools either way, because refusing to load them is how you lose the very
-	 * list the user needs to decide. Enabling is what lets the model call them.
+	 * Separate from installed: an installed package that is not enabled is never
+	 * loaded — none of its code runs, so its tools, hooks, commands, skills and
+	 * prompts are all off. Enabling is what authorizes it.
 	 */
 	enabled: boolean;
-	/** Tool names its extensions registered, once loaded. Empty until then. */
+	/** Tool names its extensions registered. Empty until it is enabled and loaded. */
 	tools: string[];
+	/** Slash commands its extensions registered, without the slash. */
+	commands: string[];
 	/** Load failure, reported rather than swallowed. */
 	error?: string;
 }
 
+/**
+ * An extension file the user placed by hand — in `~/.nekocode/agent/extensions/`
+ * or the project's `.nekocode/extensions/` — rather than installed as a package.
+ * There is no package to toggle, so these always load.
+ */
+export interface LocalExtensionSummary {
+	path: string;
+	scope: PluginScope;
+	tools: string[];
+	commands: string[];
+}
+
 export interface PluginsSnapshot {
 	plugins: PluginSummary[];
+	local: LocalExtensionSummary[];
+	/**
+	 * A session's extensions are loaded, so `tools` and `commands` are known.
+	 * Without one open — the welcome screen — nothing has run to register them.
+	 */
+	loaded: boolean;
 	/**
 	 * Extension load errors that belong to no configured package — a stray file
 	 * in `~/.nekocode/agent/extensions/` that threw.

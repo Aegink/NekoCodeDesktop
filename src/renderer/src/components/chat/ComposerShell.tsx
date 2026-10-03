@@ -17,7 +17,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useTheme } from "../../hooks/useTheme";
 import { useTranslation } from "../../i18n";
 import { cn } from "../../lib/utils";
-import { AddPlusIcon, ComposerSendArrowIcon, FileIcon, SkillCubeIcon, StopIcon, XIcon, ZapIcon } from "../../lib/icons";
+import { AddPlusIcon, ComposerSendArrowIcon, FileIcon, PluginIcon, SkillCubeIcon, StopIcon, XIcon, ZapIcon } from "../../lib/icons";
 import { fileToPromptImage, imageMimeType, namePastedImages, pastedImageFiles } from "./composer-images";
 import { editShortcut, hasSelection, redoShortcut, runEditCommand } from "../../lib/editCommands";
 import { ContextMenu, type ContextMenuState } from "../ui/context-menu";
@@ -236,7 +236,9 @@ export function ComposerShell(props: ComposerShellProps) {
 		if (!props.insertion || consumedInsertion.current === props.insertion.id) return;
 		consumedInsertion.current = props.insertion.id;
 		const insertion = props.insertion;
-		setText((draft) => draft + (draft && !draft.endsWith("\n") ? "\n" : "") + insertion.text);
+		setText((draft) =>
+			insertion.replace ? insertion.text : draft + (draft && !draft.endsWith("\n") ? "\n" : "") + insertion.text,
+		);
 		props.onInsertionConsumed?.(insertion.id);
 		textareaRef.current?.focus();
 	}, [props.insertion, props.onInsertionConsumed]);
@@ -529,7 +531,11 @@ export function ComposerShell(props: ComposerShellProps) {
 		}
 	};
 
-	const CommandIcon = command?.kind === "skill" ? SkillCubeIcon : command?.kind === "builtin" ? ZapIcon : FileIcon;
+	const CommandIcon =
+		command?.kind === "skill" ? SkillCubeIcon
+		: command?.kind === "builtin" ? ZapIcon
+		: command?.kind === "extension" ? PluginIcon
+		: FileIcon;
 
 	return (
 		<div className="px-[var(--app-density-chat-gutter-x,0.75rem)] pb-3 pt-1 sm:px-[var(--app-density-chat-gutter-x-lg,1.25rem)]">

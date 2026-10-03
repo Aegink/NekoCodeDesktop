@@ -248,11 +248,29 @@ function assistantError(message: ProjectableMessage): string | undefined {
 		: undefined;
 }
 
+function succeeded(message: ProjectableMessage): boolean {
+	return message.role === "assistant" && message.stopReason !== "error" && message.stopReason !== "aborted";
+}
+
+/**
+ * Errors before this index have been recovered from: a later model call got
+ * through, so the failure no longer describes the session and is not shown.
+ */
+function recoveredBefore(messages: readonly ProjectableMessage[]): number {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (succeeded(messages[i])) return i;
+	}
+	return -1;
+}
+
+function visibleError(message: ProjectableMessage, index: number, recovered: number): string | undefined {
+	if (message.stopReason === "error" && index < recovered) return undefined;
+	return assistantError(message);
+}
+
 /** Does this assistant message render a cell at all? Tool-call-only ones do not. */
-function showsAssistantCell(message: ProjectableMessage): boolean {
-	return Boolean(
-		textOf(message.content) || thinkingOf(message.content) || assistantError(message),
-	);
+function showsAssistantCell(message: ProjectableMessage, error: string | undefined): boolean {
+	return Boolean(textOf(message.content) || thinkingOf(message.content) || error);
 }
 
 /**
@@ -348,6 +366,7 @@ function turnUsageByMessage(
 	callTiming: CallTiming | undefined,
 	running: boolean,
 ): Map<number, TurnUsage> {
+	const recovered = recoveredBefore(messages);
 	const turns: { assistants: number[]; lastShown: number | null }[] = [];
 	let turn: { assistants: number[]; lastShown: number | null } | null = null;
 	messages.forEach((message, index) => {
@@ -362,7 +381,7 @@ function turnUsageByMessage(
 			turns.push(turn);
 		}
 		turn.assistants.push(index);
-		if (showsAssistantCell(message)) turn.lastShown = index;
+		if (showsAssistantCell(message, visibleError(message, index, recovered))) turn.lastShown = index;
 	});
 
 	const byMessage = new Map<number, TurnUsage>();
@@ -398,6 +417,7 @@ export function projectMessages(
 	running = false,
 ): AgentCell[] {
 	const usageByMessage = turnUsageByMessage(messages, callTiming, running);
+	const recovered = recoveredBefore(messages);
 	const cells: AgentCell[] = [];
 	const toolByCallId = new Map<string, ToolCell>();
 	let noticeSeq = 0;
@@ -419,7 +439,10 @@ export function projectMessages(
 			case "assistant": {
 				const text = textOf(message.content);
 				const thinking = thinkingOf(message.content);
-				const error = assistantError(message);
+				const error = visibleError(message, index, recovered);
+				// A failed call's tool calls never ran; once it is recovered from
+				// they would only sit there as pending forever.
+				const dropTools = message.stopReason === "error" && !error;
 				if (text || thinking || error) {
 					const timing = thinking ? thinkingTiming?.get(t) : undefined;
 					cells.push({
@@ -437,7 +460,7 @@ export function projectMessages(
 				}
 				// Tool calls inside the assistant content become pending tool cells
 				// in stream order; a later toolResult updates them in place.
-				if (Array.isArray(message.content)) {
+				if (!dropTools && Array.isArray(message.content)) {
 					for (const block of message.content) {
 						if (!isToolCallBlock(block)) continue;
 						const existing = toolByCallId.get(block.id);
@@ -555,6 +578,8 @@ export class CellProjector {
 	private persisted: AgentCell[] = [];
 	private overlay: AgentCell[] = [];
 	private noticeSeq = 0;
+	private retryNoticeId: string | undefined;
+	private retryFailureId: string | undefined;
 	private thinkingTiming: ThinkingTiming = new Map();
 	private callTiming: CallTiming = new Map();
 
@@ -602,6 +627,7 @@ export class CellProjector {
 					const call = this.callTiming.get(t);
 					if (call) call.endedAt ??= Date.now();
 					this.dropStreamCell(event.message);
+					if (succeeded(event.message)) this.dropRetryFailure();
 				}
 				break;
 			}
@@ -664,15 +690,21 @@ export class CellProjector {
 				break;
 			}
 			case "auto_retry_start": {
-				this.notice(
+				// One retry notice at a time: each attempt replaces the last.
+				this.dropRetryNotice();
+				this.retryNoticeId = this.notice(
 					"warning",
 					`Retrying (${event.attempt}/${event.maxAttempts}): ${event.errorMessage}`,
 				);
 				break;
 			}
 			case "auto_retry_end": {
+				// The failed attempts are already gone from history; once the retry
+				// settles, the warning about them has nothing left to describe.
+				this.dropRetryNotice();
 				if (!event.success) {
-					this.notice("error", event.finalError ?? "Retry failed");
+					this.dropRetryFailure();
+					this.retryFailureId = this.notice("error", event.finalError ?? "Retry failed");
 				}
 				break;
 			}
@@ -689,14 +721,31 @@ export class CellProjector {
 		}
 	}
 
-	notice(level: "info" | "warning" | "error", text: string): void {
+	notice(level: "info" | "warning" | "error", text: string): string {
+		const id = `notice-live-${Date.now().toString(36)}-${(this.noticeSeq++).toString(36)}`;
 		this.overlay.push({
-			id: `notice-live-${Date.now().toString(36)}-${(this.noticeSeq++).toString(36)}`,
+			id,
 			type: "notice",
 			level,
 			text,
 			timestamp: Date.now(),
 		});
+		return id;
+	}
+
+	private dropRetryNotice(): void {
+		const id = this.retryNoticeId;
+		if (!id) return;
+		this.retryNoticeId = undefined;
+		this.overlay = this.overlay.filter((c) => c.id !== id);
+	}
+
+	/** A model call got through, so the last failed retry is no longer news. */
+	private dropRetryFailure(): void {
+		const id = this.retryFailureId;
+		if (!id) return;
+		this.retryFailureId = undefined;
+		this.overlay = this.overlay.filter((c) => c.id !== id);
 	}
 
 	cells(): AgentCell[] {
@@ -739,6 +788,8 @@ export class CellProjector {
 	reset(): void {
 		this.persisted = [];
 		this.overlay = [];
+		this.retryNoticeId = undefined;
+		this.retryFailureId = undefined;
 		this.thinkingTiming.clear();
 		this.callTiming.clear();
 	}

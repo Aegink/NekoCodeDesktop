@@ -1,14 +1,18 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
-import { app, shell, type BrowserWindow } from "electron";
+import { app, dialog, shell, type BrowserWindow } from "electron";
 import type {
 	AgentSession,
 	AgentSessionEvent,
+	ExtensionCommandContextActions,
+	ExtensionError,
 	LoadExtensionsResult,
 	ModelRuntime,
 	ResourceLoader,
 	SessionManager,
+	SessionShutdownEvent,
+	SessionStartEvent,
 	SettingsManager,
 	ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
@@ -18,6 +22,7 @@ import type {
 	AgentSnapshot,
 	DeleteSessionRequest,
 	ExecutionMode,
+	ExtensionUiAnswer,
 	ForkSessionRequest,
 	ModelOption,
 	OpenSessionRequest,
@@ -58,6 +63,8 @@ import { remoteToolOutput, remoteView, type RemoteToolOutput, type RemoteViewReq
 import { contextUsage } from "./context-usage";
 import type { ModelTestRequest, ModelTestResult } from "../shared/settings";
 import { PluginService } from "./plugin-service";
+import { ExtensionUiHost } from "./extension-ui";
+import { type PluginResourcePolicy, type TrustChoice, trustProject } from "./plugin-resources";
 import { BuiltinSkillStore, resolveBuiltinSkillsDir } from "./builtin-skills";
 import type {
 	CreateSkillRequest,
@@ -163,11 +170,25 @@ const HELP_TEXT = [
 	"/terminal — open the terminal drawer",
 ].join("\n");
 
+/** Slash commands `send` answers itself, before the core could run an extension's. */
+const APP_SLASH_COMMANDS: ReadonlySet<string> = new Set([
+	"help", "new", "clear", "abort", "compact", "mode", "commit-message", "model",
+	"thinking", "terminal", "remember", "goal", "init",
+]);
+
 const NO_MODEL_ERROR =
 	"No model configured. Add credentials to ~/.nekocode/agent/auth.json or set a provider API key environment variable, then restart.";
 
 /** How often a streaming run pushes a snapshot — about the pace text is read at. */
 const STREAM_EMIT_INTERVAL_MS = 50;
+
+/** How long a prompt waits for the session's extensions to finish `session_start`. */
+const EXTENSION_START_GRACE_MS = 10_000;
+
+/** How long extensions get to clean up before their session is disposed regardless. */
+const EXTENSION_SHUTDOWN_GRACE_MS = 3_000;
+
+type SessionShutdownReason = SessionShutdownEvent["reason"];
 
 const MODES: ExecutionMode[] = ["read-only", "auto", "full-access"];
 
@@ -326,6 +347,15 @@ export class AgentService {
 	private journal: FileJournalRecorder | null = null;
 	/** What the open session's extensions registered; replaced on every reload. */
 	private extensions: LoadExtensionsResult | undefined;
+	/** Dialogs, status lines and widgets the open session's extensions show. */
+	private readonly extensionUi: ExtensionUiHost;
+	/**
+	 * The open session's extensions have heard `session_start`. Bound after the
+	 * session is on screen rather than before: an extension may ask the user
+	 * something while starting, and a session nobody can see yet could not be
+	 * answered. A prompt waits for it, so no turn runs ahead of the extensions.
+	 */
+	private extensionsReady: Promise<void> = Promise.resolve();
 	private resourceLoader: ResourceLoader | undefined;
 	/**
 	 * The agent wrote an AGENTS.md-family file during this run. The core reads
@@ -361,6 +391,16 @@ export class AgentService {
 		this.plugins = new PluginService({
 			statePath: join(app.getPath("userData"), "plugins.json"),
 			onChange: () => this.emitPlugins(),
+		});
+		this.extensionUi = new ExtensionUiHost({
+			onChange: () => {
+				if (this.session) this.scheduleEmit();
+			},
+			onNotify: (level, text) => {
+				if (!this.session) return;
+				this.projector.notice(level, text);
+				this.emit();
+			},
 		});
 		this.builtinSkills = new BuiltinSkillStore(
 			resolveBuiltinSkillsDir({
@@ -403,16 +443,70 @@ export class AgentService {
 			this.emitPlugins();
 			return;
 		}
+		await this.reloadSession(session);
+		this.emitPlugins();
+	}
+
+	/**
+	 * Reload the session's resources and extensions in place.
+	 *
+	 * What the old extensions put on screen goes first: their runtime is shut
+	 * down by the reload, so a dialog of theirs could never be answered, and the
+	 * new ones set their own status again when they hear `session_start`.
+	 */
+	private async reloadSession(session: AgentSession): Promise<void> {
+		this.extensionUi.reset();
 		await session.reload();
+		if (session !== this.session) return;
 		this.extensions = this.resourceLoader?.getExtensions();
 		this.workflow?.refresh();
-		this.emitPlugins();
 		this.emit();
+	}
+
+	/** What the session's resource loader may load from pi packages. */
+	private pluginPolicy(): PluginResourcePolicy {
+		return {
+			isEnabled: (source) => this.plugins.isEnabled(source),
+			askTrust: (cwd) => this.askProjectTrust(cwd),
+		};
+	}
+
+	/**
+	 * Ask whether a project's own plugins may run.
+	 *
+	 * A native dialog rather than one on the snapshot: it is asked while the
+	 * session is still being built, before there is a snapshot to put it on.
+	 */
+	private async askProjectTrust(cwd: string): Promise<TrustChoice> {
+		if (this.win.isDestroyed()) return "never";
+		const choices: TrustChoice[] = ["always", "once", "never"];
+		const { response } = await dialog.showMessageBox(this.win, {
+			type: "warning",
+			title: "信任此项目？",
+			message: "此项目包含插件代码",
+			detail:
+				`${cwd}
+
+项目的 .nekocode 设置声明了 pi 插件包或扩展。信任后会加载项目设置、安装缺失的项目插件并执行其中的扩展代码，它们拥有与 NekoCode 相同的系统权限。
+
+不信任时，项目自己的设置与插件都不会加载。`,
+			buttons: ["信任并记住", "仅本次信任", "不信任"],
+			defaultId: 2,
+			cancelId: 2,
+			noLink: true,
+		});
+		return choices[response] ?? "never";
 	}
 
 	async installPlugin(request: InstallPluginRequest): Promise<PluginsSnapshot> {
 		if (!this.cwd) throw new Error("请先打开一个项目");
 		await this.plugins.install(this.cwd, request);
+		// Installing into the project is the user vouching for it; asking again
+		// at the next reload whether to run what they just installed would not be.
+		if (request.scope === "project") {
+			const { getAgentDir } = await pi();
+			await trustProject(this.cwd, getAgentDir());
+		}
 		await this.reloadPlugins();
 		return this.pluginsSnapshot();
 	}
@@ -440,14 +534,12 @@ export class AgentService {
 	}
 
 	/**
-	 * Enabling changes no files, so no reload is needed — the gate reads the
-	 * plugin list on every tool call. The tool list the model sees does have to
-	 * be refreshed, or it would not know the tools appeared.
+	 * Enabling decides whether the package loads at all, so the session reloads:
+	 * turning one on imports it, turning one off shuts it down.
 	 */
 	async setPluginEnabled(request: SetPluginEnabledRequest): Promise<PluginsSnapshot> {
 		this.plugins.setEnabled(request);
-		this.workflow?.refresh();
-		this.emit();
+		await this.reloadPlugins();
 		return this.pluginsSnapshot();
 	}
 
@@ -581,7 +673,33 @@ export class AgentService {
 			{ name: "init", description: "分析项目并生成或改进 AGENTS.md", kind: "builtin", argumentHint: "[补充要求]" },
 			{ name: "remember", description: "记住一条项目约定；--global 记为所有项目的个人偏好", kind: "builtin", argumentHint: "[--global] <内容>" },
 		];
-		return [...builtins, ...prompts.sort(byName), ...skills.sort(byName)];
+		const taken = new Set([...APP_SLASH_COMMANDS, ...prompts.map((c) => c.name), ...skills.map((c) => c.name)]);
+		const extensions: SlashCommandSummary[] = this.extensionCommands()
+			.filter((command) => !taken.has(command.name))
+			.map((command) => ({ ...command, kind: "extension" }));
+		return [...builtins, ...extensions.sort(byName), ...prompts.sort(byName), ...skills.sort(byName)];
+	}
+
+	/**
+	 * Commands the session's plugins registered.
+	 *
+	 * One the app handles itself is left out: `send` answers `/model` or `/new`
+	 * before the core sees the text, so an extension command of that name could
+	 * never run, and offering it would be offering something else.
+	 */
+	private extensionCommands(): Array<{ name: string; description: string }> {
+		try {
+			return (this.session?.extensionRunner.getRegisteredCommands() ?? [])
+				.filter((command) => !APP_SLASH_COMMANDS.has(command.invocationName))
+				.map((command) => ({ name: command.invocationName, description: command.description ?? "" }));
+		} catch {
+			return [];
+		}
+	}
+
+	/** Does this slash command belong to a plugin, which runs it without a turn? */
+	private isExtensionCommand(name: string): boolean {
+		return this.extensionCommands().some((command) => command.name === name);
 	}
 
 	/**
@@ -596,12 +714,7 @@ export class AgentService {
 	async setSkillEnabled(request: SetSkillEnabledRequest): Promise<SkillsSnapshot> {
 		this.builtinSkills.setEnabled(request.name, request.enabled);
 		const session = this.session;
-		if (session) {
-			await session.reload();
-			this.extensions = this.resourceLoader?.getExtensions();
-			this.workflow?.refresh();
-			this.emit();
-		}
+		if (session) await this.reloadSession(session);
 		return this.skillsSnapshot();
 	}
 
@@ -622,11 +735,7 @@ export class AgentService {
 		}
 		this.instructionsDirty = false;
 		try {
-			await session.reload();
-			if (session !== this.session) return;
-			this.extensions = this.resourceLoader?.getExtensions();
-			this.workflow?.refresh();
-			this.emit();
+			await this.reloadSession(session);
 		} catch (error) {
 			this.projector.notice("warning", "项目指令未能重新加载：" + (error instanceof Error ? error.message : String(error)));
 			this.emit();
@@ -1234,6 +1343,18 @@ export class AgentService {
 			const handled = await this.handleSlash(slash.command, slash.args);
 			if (handled) return handled;
 		}
+		await this.waitForExtensions();
+		if (session !== this.session) return { accepted: false, error: "会话已切换" };
+		// A plugin's command is not a turn: no model is needed, nothing is
+		// checkpointed, and the session is not named after it. The handler does
+		// what it does — perhaps a turn of its own through `sendUserMessage`.
+		if (slash && this.isExtensionCommand(slash.command)) {
+			session.prompt(text).catch((error: unknown) => {
+				this.projector.notice("error", error instanceof Error ? error.message : String(error));
+				this.emit();
+			});
+			return { accepted: true };
+		}
 		// Rewritten rather than handled: /init is an ordinary turn with a prompt
 		// the user did not have to write, so it runs, streams and checkpoints like
 		// any other.
@@ -1757,8 +1878,7 @@ export class AgentService {
 		this.workflow = null;
 		this.unsubscribe?.();
 		this.unsubscribe = null;
-		this.session?.dispose();
-		this.session = null;
+		void this.retireSession("quit");
 		this.wasStreaming = false;
 		this.cancelScheduledEmit();
 		this.projectionDirty = false;
@@ -1772,7 +1892,17 @@ export class AgentService {
 	private async startSession(
 		sessionManager: SessionManager,
 		freshCwd?: string,
+		/** Why, as the extensions hear it; inferred when the app itself is switching. */
+		start?: SessionStartEvent,
 	): Promise<AgentSnapshot> {
+		const previousFile = this.session?.sessionFile;
+		const startEvent: SessionStartEvent = start ?? {
+			type: "session_start",
+			// pi's own reasons: the first session this task holds is its startup;
+			// after that it is replacing one, with a new or an existing transcript.
+			reason: this.session ? (freshCwd ? "new" : "resume") : "startup",
+			...(previousFile ? { previousSessionFile: previousFile } : {}),
+		};
 		this.preview?.dispose();
 		const preview = new BrowserPreview({
 			cwd: sessionManager.getCwd(), sessionId: sessionManager.getSessionId(),
@@ -1792,8 +1922,10 @@ export class AgentService {
 		// This transition owns the currently-active session; dispose it now.
 		this.unsubscribe?.();
 		this.unsubscribe = null;
-		this.session?.dispose();
-		this.session = null;
+		const retiring = this.retireSession(
+			startEvent.reason === "startup" || startEvent.reason === "reload" ? "new" : startEvent.reason,
+			sessionManager.getSessionFile(),
+		);
 		this.cancelScheduledEmit();
 		this.projectionDirty = false;
 		this.projector.reset();
@@ -1801,6 +1933,7 @@ export class AgentService {
 		this.journal?.reset();
 		this.journal = null;
 
+		await retiring;
 		await previousWorkflow?.state.whenSettled();
 		if (generation !== this.generation) throw new Error("Session superseded");
 		const { SettingsManager } = await pi();
@@ -1867,6 +2000,8 @@ export class AgentService {
 				]),
 			],
 			builtinSkills: this.builtinSkills,
+			plugins: this.pluginPolicy(),
+			sessionStartEvent: startEvent,
 			getMemory: () => memorySection(sessionManager.getCwd()),
 			getGoal: () => goalPromptSection(this.goal),
 			customTools: [
@@ -1933,7 +2068,220 @@ export class AgentService {
 		this.emit(snapshot);
 		this.emitSessionsChanged();
 		this.emitPlugins();
+		this.extensionsReady = this.bindSessionExtensions(session, generation);
 		return snapshot;
+	}
+
+	/**
+	 * Give the session's extensions what pi's own front ends give them: a UI to
+	 * ask through, the session actions their commands call, and somewhere to
+	 * report errors. This is also what fires `session_start`, which most
+	 * extensions set themselves up in — without it they load and then sit idle.
+	 */
+	private async bindSessionExtensions(session: AgentSession, generation: number): Promise<void> {
+		try {
+			await session.bindExtensions({
+				uiContext: this.extensionUi.context(),
+				// "rpc" is pi's mode for a front end that is not a terminal but can
+				// show dialogs; "tui" would promise components this cannot draw.
+				mode: "rpc",
+				commandContextActions: this.commandActions(),
+				// A plugin asking to quit the app is not its call to make here.
+				shutdownHandler: () => undefined,
+				onError: (error) => this.reportExtensionError(error, generation),
+			});
+		} catch (error) {
+			if (generation === this.generation)
+				this.projector.notice("error", "插件初始化失败：" + (error instanceof Error ? error.message : String(error)));
+		}
+		if (generation !== this.generation || session !== this.session) return;
+		// `session_start` may have registered tools, or pulled in skills through
+		// `resources_discover`; the plugin list and the gate read both.
+		this.extensions = this.resourceLoader?.getExtensions();
+		this.workflow?.refresh();
+		this.emitPlugins();
+		this.emit();
+	}
+
+	private reportExtensionError(error: ExtensionError, generation: number): void {
+		if (generation !== this.generation) return;
+		const where = error.extensionPath.startsWith("command:")
+			? `/${error.extensionPath.slice("command:".length)}`
+			: basename(error.extensionPath).replace(/\.[cm]?[jt]s$/, "") || error.extensionPath;
+		this.projector.notice("error", `插件 ${where} 出错（${error.event}）：${error.error}`);
+		this.emit();
+	}
+
+	/**
+	 * Wait for the open session's extensions to finish starting, but not
+	 * forever: one stuck on the network must not take the composer with it.
+	 */
+	private async waitForExtensions(): Promise<void> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		await Promise.race([
+			this.extensionsReady,
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, EXTENSION_START_GRACE_MS);
+			}),
+		]);
+		clearTimeout(timer);
+	}
+
+	/**
+	 * Let the outgoing session's extensions clean up — stop their timers, close
+	 * their servers — then dispose it. pi's own front ends send
+	 * `session_shutdown` whenever a session is replaced or the app quits.
+	 */
+	private retireSession(reason: SessionShutdownReason, targetSessionFile?: string): Promise<void> {
+		const session = this.session;
+		this.session = null;
+		this.extensionUi.reset();
+		this.extensionsReady = Promise.resolve();
+		if (!session) return Promise.resolve();
+		const runner = session.extensionRunner;
+		const shutdown = runner.hasHandlers("session_shutdown")
+			? runner.emit({ type: "session_shutdown", reason, ...(targetSessionFile ? { targetSessionFile } : {}) })
+			: Promise.resolve();
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		return Promise.race([
+			Promise.resolve(shutdown).then(() => undefined, () => undefined),
+			new Promise<void>((resolve) => {
+				timer = setTimeout(resolve, EXTENSION_SHUTDOWN_GRACE_MS);
+			}),
+		]).finally(() => {
+			clearTimeout(timer);
+			session.dispose();
+		});
+	}
+
+	answerExtensionUi(answer: ExtensionUiAnswer): AgentSnapshot | null {
+		this.extensionUi.answer(answer);
+		return this.session ? this.buildSnapshot() : null;
+	}
+
+	/**
+	 * What an extension command's `ctx.newSession()`, `fork()` and the rest do.
+	 *
+	 * pi's front ends replace the session the command ran in, and so does this:
+	 * the task keeps its place on the board and in the window, and its
+	 * transcript becomes the new one. Each read `this.session` when called — the
+	 * command may well have replaced it already.
+	 */
+	private commandActions(): ExtensionCommandContextActions {
+		return {
+			waitForIdle: async () => {
+				await this.session?.waitForIdle();
+			},
+			newSession: async (options) => {
+				const current = this.session;
+				if (!current) return { cancelled: true };
+				if (await this.beforeSwitch(current, "new")) return { cancelled: true };
+				const cwd = current.sessionManager.getCwd();
+				const { SessionManager } = await pi();
+				const sessionManager = SessionManager.create(cwd, this.sessionDir);
+				if (options?.parentSession) sessionManager.newSession({ parentSession: options.parentSession });
+				await this.startSession(sessionManager, cwd, {
+					type: "session_start",
+					reason: "new",
+					...(current.sessionFile ? { previousSessionFile: current.sessionFile } : {}),
+				});
+				if (options?.setup && this.session) {
+					await options.setup(this.session.sessionManager);
+					this.session.refreshContext();
+					this.projectionDirty = true;
+					this.emit();
+				}
+				await this.afterReplace(options?.withSession);
+				return { cancelled: false };
+			},
+			fork: async (entryId, options) => {
+				const current = this.session;
+				if (!current) return { cancelled: true };
+				const position = options?.position ?? "before";
+				const runner = current.extensionRunner;
+				if (runner.hasHandlers("session_before_fork")) {
+					const result = (await runner.emit({ type: "session_before_fork", entryId, position })) as { cancel?: boolean } | undefined;
+					if (result?.cancel) return { cancelled: true };
+				}
+				const sm = current.sessionManager;
+				const entry = sm.getEntry(entryId);
+				if (!entry) throw new Error("Invalid entry ID for forking");
+				let target: string | null;
+				if (position === "at") target = entry.id;
+				else if (entry.type === "message" && entry.message.role === "user") target = entry.parentId;
+				else throw new Error("Invalid entry ID for forking");
+				const file = current.sessionFile;
+				const { SessionManager } = await pi();
+				let next: SessionManager;
+				if (!target) {
+					next = SessionManager.create(sm.getCwd(), this.sessionDir);
+					if (file) next.newSession({ parentSession: file });
+				} else {
+					if (!file || !existsSync(file)) throw new Error("会话尚未保存，无法创建分支");
+					// A second manager over the file: branching switches the manager
+					// it is done through over to the copy, and the live one must not.
+					next = SessionManager.open(file, this.sessionDir, sm.getCwd());
+					if (!next.createBranchedSession(target)) throw new Error("创建分支失败");
+				}
+				await this.startSession(next, undefined, {
+					type: "session_start",
+					reason: "fork",
+					...(file ? { previousSessionFile: file } : {}),
+				});
+				await this.afterReplace(options?.withSession);
+				return { cancelled: false };
+			},
+			navigateTree: async (targetId, options) => {
+				const session = this.session;
+				if (!session) return { cancelled: true };
+				const result = await session.navigateTree(targetId, options);
+				this.projectionDirty = true;
+				this.emit();
+				this.emitSessionsChanged();
+				return { cancelled: result.cancelled };
+			},
+			switchSession: async (sessionPath, options) => {
+				const current = this.session;
+				if (!current) return { cancelled: true };
+				const file = this.resolveSessionFile(sessionPath);
+				if (await this.beforeSwitch(current, "resume", file)) return { cancelled: true };
+				const { SessionManager } = await pi();
+				const next = SessionManager.open(file, this.sessionDir);
+				assertDirectory(next.getCwd());
+				this.cwd = next.getCwd();
+				await this.startSession(next, undefined, {
+					type: "session_start",
+					reason: "resume",
+					...(current.sessionFile ? { previousSessionFile: current.sessionFile } : {}),
+				});
+				await this.afterReplace(options?.withSession);
+				return { cancelled: false };
+			},
+			reload: async () => {
+				await this.reloadPlugins();
+			},
+		};
+	}
+
+	/** `session_before_switch`: an extension may veto leaving the session. */
+	private async beforeSwitch(session: AgentSession, reason: "new" | "resume", targetSessionFile?: string): Promise<boolean> {
+		const runner = session.extensionRunner;
+		if (!runner.hasHandlers("session_before_switch")) return false;
+		const result = (await runner.emit({
+			type: "session_before_switch",
+			reason,
+			...(targetSessionFile ? { targetSessionFile } : {}),
+		})) as { cancel?: boolean } | undefined;
+		return result?.cancel === true;
+	}
+
+	/** The rest of a command's session replacement, run against the new session. */
+	private async afterReplace(withSession?: (ctx: ReturnType<AgentSession["createReplacedSessionContext"]>) => Promise<void>): Promise<void> {
+		this.emitSessionsChanged();
+		const session = this.session;
+		if (!session) return;
+		await this.extensionsReady;
+		if (withSession && session === this.session) await withSession(session.createReplacedSessionContext());
 	}
 
 	private onSessionEvent(event: AgentSessionEvent): void {
@@ -1961,10 +2309,14 @@ export class AgentService {
 		const session = this.session;
 		if (!session) return { accepted: false, error: "No active session" };
 		switch (command) {
-			case "help":
-				this.projector.notice("info", HELP_TEXT);
+			case "help": {
+				const plugins = this.extensionCommands().map(
+					(command) => `/${command.name}${command.description ? ` — ${command.description}` : ""}`,
+				);
+				this.projector.notice("info", plugins.length ? `${HELP_TEXT}\n\n插件命令：\n${plugins.join("\n")}` : HELP_TEXT);
 				this.emit();
 				return { accepted: true };
+			}
 			case "new":
 			case "clear":
 				return { accepted: true, action: "new-session" };
@@ -2156,6 +2508,10 @@ export class AgentService {
 			workMode: this.workMode,
 			agentPhase: this.workflow?.agentPhase ?? DEFAULT_AGENT_PHASE,
 			goal: this.goal,
+			...(() => {
+				const extensionUi = this.extensionUi.snapshot();
+				return extensionUi ? { extensionUi } : {};
+			})(),
 			error: this.pendingError,
 		};
 	}
