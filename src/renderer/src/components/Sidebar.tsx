@@ -1,4 +1,5 @@
 import type { SessionSummary } from "../../../shared/agent";
+import type { AcpAgentInfo } from "../../../shared/acp";
 import type { ThemeMode } from "../hooks/useTheme";
 import { projectLabel } from "../../../shared/paths";
 import { api } from "../api";
@@ -12,6 +13,7 @@ import {
 import type { WorkspaceView } from "../App";
 import { useTranslation, type TranslationKey } from "../i18n";
 import { SessionList } from "./sessions/SessionList";
+import { AgentIcon } from "./agents/AgentIcon";
 import { IconButton } from "./ui/icon-button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
@@ -42,12 +44,14 @@ const SECONDARY_NAV: ReadonlyArray<{
 interface SidebarProps {
 	cwd: string | null;
 	workspaces: string[];
+	/** Workspace keys the user removed from the list. */
+	hiddenWorkspaces: string[];
+	onRemoveWorkspace: (cwd: string) => void;
+	/** NekoLocal's sessions and every enabled agent's, together. */
 	sessions: SessionSummary[];
 	sessionsLoading: boolean;
-	/** The workspace whose history the list shows: NekoLocal or an agent. */
-	workspaceName?: string;
-	/** An external agent's history: rows open, but cannot be renamed or deleted here. */
-	sessionsReadOnly?: boolean;
+	/** The configured agents, for the icon on an agent's rows. */
+	agents: readonly AcpAgentInfo[];
 	/** Rows can be dragged into the chat area to open side by side. */
 	sessionsDraggable?: boolean;
 	activeSessionId: string | null;
@@ -202,6 +206,8 @@ export function Sidebar(props: SidebarProps) {
 				activeId={view === "chat" ? activeSessionId : null}
 				currentCwd={cwd}
 				workspaces={props.workspaces}
+				hiddenWorkspaces={props.hiddenWorkspaces}
+				onRemoveWorkspace={props.onRemoveWorkspace}
 				homeDir={api.homeDir}
 				busy={busy}
 				onAddWorkspace={onPickProject}
@@ -212,9 +218,16 @@ export function Sidebar(props: SidebarProps) {
 				onRename={onRenameSession}
 				sessions={sessions}
 				streaming={streaming}
-				caption={props.workspaceName}
-				readOnly={props.sessionsReadOnly}
 				draggable={props.sessionsDraggable}
+				rowIcon={(session) => {
+					if (!session.agentId) return null;
+					const agent = props.agents.find((entry) => entry.id === session.agentId);
+					return (
+						<span className="flex shrink-0 text-muted-foreground/70" title={agent?.name ?? session.agentId}>
+							<AgentIcon agent={agent} className="size-3" />
+						</span>
+					);
+				}}
 			/>
 
 			<div className="flex flex-col gap-1 px-2 pb-2 pt-1">

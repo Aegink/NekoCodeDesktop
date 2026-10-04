@@ -8,6 +8,7 @@
  */
 import type { AgentCell, ContextUsage, TurnUsage } from "../../shared/agent";
 import type { AcpCommand, AcpConfigOption } from "../../shared/acp";
+import type { ShellFileChange } from "./workspace-changes";
 
 type ToolCell = Extract<AgentCell, { type: "tool" }>;
 type AssistantCell = Extract<AgentCell, { type: "assistant" }>;
@@ -105,7 +106,7 @@ function toolStatus(status: unknown): ToolCell["status"] {
 }
 
 /** Everything the agent has said about one tool call, merged across updates. */
-type RawToolCall = Json & { toolCallId: string };
+export type RawToolCall = Json & { toolCallId: string };
 
 function commandOf(rawInput: unknown): string | undefined {
 	if (!isObject(rawInput)) return undefined;
@@ -123,7 +124,48 @@ function firstLocation(raw: RawToolCall): string | undefined {
 	return isObject(first) ? str(first.path) : undefined;
 }
 
-export function mapToolCall(raw: RawToolCall): Pick<ToolCell, "toolName" | "args" | "output" | "status"> {
+type MappedTool = Pick<ToolCell, "toolName" | "args" | "output" | "status" | "details">;
+
+/**
+ * Line diff of two texts in the edit card's format (`+12 text`, `-12 text`).
+ * pi's own, handed in once loaded: the projection itself stays synchronous.
+ */
+export type TextDiffer = (oldText: string, newText: string) => string;
+
+function lf(text: string): string {
+	return text.replace(/\r\n/g, "\n");
+}
+
+/**
+ * One file's diffs as a card. Codex sends the whole file before and after,
+ * Claude the replaced snippet; either way the card is told what changed, not
+ * shown everything red and then everything green.
+ */
+function fileCard(path: string, diffs: Json[], output: string, status: ToolCell["status"], differ?: TextDiffer): MappedTool {
+	const oldText = diffs[0].oldText;
+	if (diffs.length === 1 && (oldText === null || oldText === undefined)) {
+		return { toolName: "write", args: { path, content: str(diffs[0].newText) ?? "" }, output, status };
+	}
+	const edits = diffs.map((diff) => ({ oldText: str(diff.oldText) ?? "", newText: str(diff.newText) ?? "" }));
+	const diff = differ
+		? edits
+				.map((edit) => differ(lf(edit.oldText), lf(edit.newText)))
+				.filter(Boolean)
+				.join("\n ...\n")
+		: "";
+	return { toolName: "edit", args: { path, edits }, output, status, ...(diff ? { details: { diff } } : {}) };
+}
+
+/** The first card a tool call shows; see `mapToolCalls`. */
+export function mapToolCall(raw: RawToolCall, differ?: TextDiffer): MappedTool {
+	return mapToolCalls(raw, differ)[0];
+}
+
+/**
+ * The cards one tool call shows: one, except for an edit that touches several
+ * files — Codex's apply_patch — which gets a card per file.
+ */
+export function mapToolCalls(raw: RawToolCall, differ?: TextDiffer, liveOutput = ""): MappedTool[] {
 	const content = Array.isArray(raw.content) ? raw.content.filter(isObject) : [];
 	const rawInput = raw.rawInput;
 	const input = isObject(rawInput) ? rawInput : {};
@@ -134,63 +176,66 @@ export function mapToolCall(raw: RawToolCall): Pick<ToolCell, "toolName" | "args
 		.map((entry) => contentBlockText(entry.content))
 		.filter(Boolean)
 		.join("\n");
-	const output = truncate(text || rawOutputText(raw.rawOutput));
+	// Until the command's result lands, what it has printed so far.
+	const output = truncate(text || rawOutputText(raw.rawOutput) || liveOutput);
 
 	// An MCP tool the agent called — NekoCode's own among them. Codex reports
 	// these as `execute` with the server, tool and arguments in `rawInput`.
 	if (typeof input.server === "string" && typeof input.tool === "string") {
-		return {
-			toolName: input.tool,
-			args: isObject(input.arguments) ? input.arguments : {},
-			output: truncate(text || mcpResultText(raw.rawOutput)),
-			status,
-		};
+		return [
+			{
+				toolName: input.tool,
+				args: isObject(input.arguments) ? input.arguments : {},
+				output: truncate(text || mcpResultText(raw.rawOutput)),
+				status,
+			},
+		];
 	}
 
 	// The agent reasoning about something rather than acting — Codex's automatic
 	// approval review, for one. Its input is bookkeeping ids; its text is the point.
 	if (raw.kind === "think") {
 		const verdict = text.split("\n").find((line) => line.trim())?.trim();
-		return { toolName: title || "think", args: verdict ? { summary: verdict } : {}, output, status };
+		return [{ toolName: title || "think", args: verdict ? { summary: verdict } : {}, output, status }];
 	}
 
 	const diffs = content.filter((entry) => entry.type === "diff");
 	if (diffs.length > 0) {
-		const path = str(diffs[0].path) ?? firstLocation(raw) ?? "";
-		const oldText = diffs[0].oldText;
-		if (diffs.length === 1 && (oldText === null || oldText === undefined)) {
-			return { toolName: "write", args: { path, content: str(diffs[0].newText) ?? "" }, output, status };
+		const byPath = new Map<string, Json[]>();
+		for (const diff of diffs) {
+			const path = str(diff.path) ?? firstLocation(raw) ?? "";
+			byPath.set(path, [...(byPath.get(path) ?? []), diff]);
 		}
-		return {
-			toolName: "edit",
-			args: {
-				path,
-				edits: diffs.map((diff) => ({ oldText: str(diff.oldText) ?? "", newText: str(diff.newText) ?? "" })),
-			},
-			output,
-			status,
-		};
+		return [...byPath].map(([path, fileDiffs]) => fileCard(path, fileDiffs, output, status, differ));
 	}
 
 	switch (raw.kind) {
 		case "execute":
-			return { toolName: "bash", args: { command: commandOf(rawInput) ?? title }, output, status };
+			return [{ toolName: "bash", args: { command: commandOf(rawInput) ?? title }, output, status }];
 		case "read": {
 			const path = firstLocation(raw) ?? str(input.path) ?? str(input.file_path);
-			if (path) return { toolName: "read", args: { path }, output, status };
+			if (path) return [{ toolName: "read", args: { path }, output, status }];
 			break;
 		}
 		case "search": {
 			const pattern = str(input.pattern) ?? str(input.query) ?? title;
-			return { toolName: "grep", args: { pattern }, output, status };
+			return [{ toolName: "grep", args: { pattern }, output, status }];
 		}
 	}
-	return {
-		toolName: title || str(raw.kind) || "tool",
-		args: rawInput === undefined ? {} : rawInput,
-		output,
-		status,
-	};
+	return [
+		{
+			toolName: title || str(raw.kind) || "tool",
+			args: rawInput === undefined ? {} : rawInput,
+			output,
+			status,
+		},
+	];
+}
+
+/** The files an edit tool call reports changing. */
+export function diffPaths(raw: RawToolCall): string[] {
+	const content = Array.isArray(raw.content) ? raw.content.filter(isObject) : [];
+	return content.flatMap((entry) => (entry.type === "diff" && str(entry.path) ? [str(entry.path)!] : []));
 }
 
 interface RawConfigOption {
@@ -235,10 +280,25 @@ export class AcpProjection {
 	private nextCell = 1;
 	private readonly messageIds = new Map<string, string>();
 	private readonly toolCalls = new Map<string, RawToolCall>();
-	private readonly toolCells = new Map<string, string>();
+	/** The cards each tool call shows, in order. */
+	private readonly toolCells = new Map<string, string[]>();
+	/** The cards for files a command changed, kept apart from the command's own. */
+	private readonly shellCells = new Map<string, string[]>();
+	/** Output a running command has streamed, before its result says it all. */
+	private readonly liveOutput = new Map<string, string>();
 	private planCellId: string | null = null;
+	private differ: TextDiffer | undefined;
 
 	constructor(private readonly now: () => number = Date.now) {}
+
+	setDiffer(differ: TextDiffer): void {
+		this.differ = differ;
+	}
+
+	/** Everything the agent has said about one tool call so far. */
+	toolCall(toolCallId: string): Readonly<RawToolCall> | undefined {
+		return this.toolCalls.get(toolCallId);
+	}
 
 	private id(prefix: string): string {
 		return `${prefix}-${this.nextCell++}`;
@@ -486,20 +546,68 @@ export class AcpProjection {
 		const { sessionUpdate: _kind, ...fields } = update;
 		const merged: RawToolCall = { ...(this.toolCalls.get(toolCallId) ?? {}), ...fields, toolCallId };
 		this.toolCalls.set(toolCallId, merged);
-		const mapped = mapToolCall(merged);
+		// Codex streams a command's output as it prints, ahead of the result.
+		const delta = isObject(update._meta) && isObject(update._meta.terminal_output_delta) ? str(update._meta.terminal_output_delta.data) : undefined;
+		if (delta) this.liveOutput.set(toolCallId, (this.liveOutput.get(toolCallId) ?? "") + delta);
+		const mapped = mapToolCalls(merged, this.differ, this.liveOutput.get(toolCallId));
 		const now = this.now();
-		const cellId = this.toolCells.get(toolCallId);
-		const index = cellId ? this.indexOf(cellId) : -1;
-		if (index !== -1) {
-			const cell = this.cells[index] as ToolCell;
-			const finished = mapped.status === "done" || mapped.status === "error";
-			this.replace(index, { ...cell, ...mapped, timestamp: finished ? now : cell.timestamp });
-			return true;
-		}
-		this.closeAssistant();
-		const id = this.id("tool");
-		this.toolCells.set(toolCallId, id);
-		this.push({ id, type: "tool", toolCallId, ...mapped, startedAt: now, timestamp: now });
+		const finished = mapped[0].status === "done" || mapped[0].status === "error";
+		if (finished) this.liveOutput.delete(toolCallId);
+		const ids = (this.toolCells.get(toolCallId) ?? []).filter((id) => this.indexOf(id) !== -1);
+		if (ids.length === 0) this.closeAssistant();
+		// Card by card: the first ones exist already, any more go in after them.
+		const kept: string[] = [];
+		let insertAt = ids.length > 0 ? this.indexOf(ids[ids.length - 1]) + 1 : this.cells.length;
+		mapped.forEach((card, position) => {
+			const cellToolCallId = position === 0 ? toolCallId : `${toolCallId}#${position}`;
+			const existing = ids[position];
+			if (existing) {
+				const index = this.indexOf(existing);
+				const cell = this.cells[index] as ToolCell;
+				this.replace(index, { ...cell, ...card, toolCallId: cellToolCallId, timestamp: finished ? now : cell.timestamp });
+				kept.push(existing);
+				return;
+			}
+			const id = this.id("tool");
+			this.cells = [
+				...this.cells.slice(0, insertAt),
+				{ id, type: "tool", toolCallId: cellToolCallId, ...card, startedAt: now, timestamp: now },
+				...this.cells.slice(insertAt),
+			];
+			insertAt++;
+			kept.push(id);
+		});
+		// A card for a file the call no longer reports.
+		const dropped = new Set(ids.slice(mapped.length));
+		if (dropped.size > 0) this.cells = this.cells.filter((cell) => !dropped.has(cell.id));
+		this.toolCells.set(toolCallId, kept);
+		return true;
+	}
+
+	/**
+	 * Files a finished command changed, shown as edit cards right under it.
+	 * Returns false when there was nothing to show.
+	 */
+	addShellChanges(toolCallId: string, changes: readonly ShellFileChange[]): boolean {
+		const shown = this.shellCells.get(toolCallId) ?? [];
+		const ids = [...(this.toolCells.get(toolCallId) ?? []), ...shown];
+		const anchor = ids.length > 0 ? this.indexOf(ids[ids.length - 1]) : -1;
+		if (anchor === -1 || changes.length === 0) return false;
+		const now = this.now();
+		const cards: ToolCell[] = changes.map((change) => ({
+			id: this.id("tool"),
+			type: "tool",
+			toolCallId: `${toolCallId}:${change.path}`,
+			...(change.kind === "add"
+				? { toolName: "write", args: { path: change.path, content: change.content ?? "" } }
+				: { toolName: "edit", args: { path: change.path }, details: { diff: change.diff } }),
+			output: "",
+			status: "done",
+			startedAt: now,
+			timestamp: now,
+		}));
+		this.cells = [...this.cells.slice(0, anchor + 1), ...cards, ...this.cells.slice(anchor + 1)];
+		this.shellCells.set(toolCallId, [...shown, ...cards.map((card) => card.id)]);
 		return true;
 	}
 

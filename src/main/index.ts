@@ -887,6 +887,7 @@ function createWindow(): void {
 	void mcpService.refresh();
 	qqBotService ??= createQqBotService();
 	lanService = new LanService(app.getPath("userData"), taskManager);
+	void lanService.restore().catch((error) => console.error("LAN restore:", error));
 	relayService = new RelayService({
 		userDataDir: app.getPath("userData"),
 		encryption: safeStorage,
@@ -1177,7 +1178,7 @@ function registerIpc(): void {
 	ipcMain.handle("lan:status", () => lanService?.status());
 	ipcMain.handle("lan:enabled", (_e, enabled: boolean) => {
 		if (typeof enabled !== "boolean" || !lanService) throw new Error("LAN service unavailable");
-		return enabled ? lanService.start() : lanService.stop();
+		return lanService.setEnabled(enabled);
 	});
 	ipcMain.handle("lan:pairing", () => lanService?.newPairing());
 	ipcMain.handle("lan:revoke", (_e, id: string) => lanService?.revoke(id));
@@ -1349,6 +1350,11 @@ function registerIpc(): void {
 			store: new AcpConfigStore(app.getPath("userData")),
 			appRoot: app.getAppPath(),
 			toolServers: acpToolServers,
+			// The same line diff NekoLocal's edit tool shows.
+			textDiffer: async () => {
+				const { generateDiffString } = await pi();
+				return (oldText, newText) => generateDiffString(oldText, newText).diff;
+			},
 			proxyUrl: () => proxyService?.current().url,
 			emitHistoryChanged: (agentId) => {
 				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("acp:historyChanged", agentId);

@@ -120,7 +120,7 @@ describe("LAN authentication and task API", () => {
 		expect((await f.request("/api/tasks", { ...body, requestId: "another-request-12345" }, token)).status).toBe(403);
 	});
 
-	test("limits pairing guesses, serves only the native client API, and starts disabled after restart", async () => {
+	test("limits pairing guesses, serves only the native client API, and stays off after restart unless the user turned it on", async () => {
 		const f = await setup(); const token = await f.pair();
 		const response = await f.request("/api/info"); expect(response.status).toBe(200);
 		expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
@@ -132,6 +132,25 @@ describe("LAN authentication and task API", () => {
 		expect(restarted.status().enabled).toBe(false);
 		expect(restarted.status().devices).toHaveLength(1);
 		expect(JSON.stringify(restarted.status())).not.toContain(token);
+		await restarted.restore(0);
+		expect(restarted.status().enabled).toBe(false);
+	});
+
+	test("a switched-on gateway comes back after restart until the user switches it off", async () => {
+		const f = await setup();
+		await f.service.stop();
+		await f.service.setEnabled(true, 0);
+		// Shutdown stops the server but must not forget the user's choice.
+		await f.service.stop();
+		const restarted = new LanService(f.dir, f.tasks);
+		fixtures.push({ service: restarted, dir: f.dir });
+		await restarted.restore(0);
+		expect(restarted.status().enabled).toBe(true);
+		await restarted.setEnabled(false);
+		expect(restarted.status().enabled).toBe(false);
+		const again = new LanService(f.dir, f.tasks);
+		await again.restore(0);
+		expect(again.status().enabled).toBe(false);
 	});
 
 	test("rejects oversized bodies and cross-site form submissions", async () => {

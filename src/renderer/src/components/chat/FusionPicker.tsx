@@ -53,11 +53,11 @@ export function FusionPicker(props: Props) {
 										[levelField]: preferredLevel(next, value[levelField]) }));
 								}}>
 									<SelectTrigger aria-labelledby={`${id}-${role}`} size="sm" className="w-44 min-w-0">
-										<SelectValue>{model ? modelLabel(model) : t("picker.noModel")}</SelectValue>
+										<SelectValue>{model ? modelLabel(model, props.models) : t("picker.noModel")}</SelectValue>
 									</SelectTrigger>
 									<ComposerPickerSelectPopup>
 										{props.models.map((option) => <SelectItem key={option.key} value={option.key}>
-											{modelLabel(option)}
+											{modelLabel(option, props.models)}
 										</SelectItem>)}
 									</ComposerPickerSelectPopup>
 								</Select>

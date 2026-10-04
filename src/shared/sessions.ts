@@ -14,9 +14,13 @@ export interface WorkspaceSessionGroup {
 	sessions: SessionSummary[];
 }
 
-/** Workspaces group by full path, never by basename. Search includes paths. */
+/**
+ * Workspaces group by full path, never by basename. Search includes paths.
+ * A `hidden` workspace key is left out entirely — the current one and its
+ * sessions too — since removing it from the list is the point.
+ */
 export function groupSessionsByWorkspace(sessions: readonly SessionSummary[], options: {
-	workspaces?: readonly string[]; currentCwd?: string | null; query?: string; homeDir?: string;
+	workspaces?: readonly string[]; hidden?: readonly string[]; currentCwd?: string | null; query?: string; homeDir?: string;
 } = {}): WorkspaceSessionGroup[] {
 	const groups = new Map<string, WorkspaceSessionGroup>();
 	const add = (cwd: string) => {
@@ -32,7 +36,8 @@ export function groupSessionsByWorkspace(sessions: readonly SessionSummary[], op
 	return [...groups.values()].map((group) => ({
 		...group,
 		sessions: group.sessions.filter((session) => !query || group.cwd.toLowerCase().includes(query) || sessionMatchesQuery(session, query)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionFile.localeCompare(b.sessionFile)),
-	})).filter((group) => !query || group.sessions.length > 0 || group.cwd.toLowerCase().includes(query))
+	})).filter((group) => !(group.id && options.hidden?.includes(group.id)))
+		.filter((group) => !query || group.sessions.length > 0 || group.cwd.toLowerCase().includes(query))
 		.sort((a, b) => {
 			const current = options.currentCwd ? workspaceKey(options.currentCwd) : null;
 			if (a.id === current) return -1;

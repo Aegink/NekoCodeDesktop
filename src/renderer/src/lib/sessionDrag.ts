@@ -1,7 +1,10 @@
 import type { SessionSummary } from "../../../shared/agent";
 
-/** A session being carried to the chat area: from the sidebar, or a pane's grip. */
-export type DraggedSession = Pick<SessionSummary, "id" | "cwd" | "sessionFile">;
+/**
+ * A session being carried to the chat area: from the sidebar, or a pane's grip.
+ * `agentId` marks an external agent's conversation, whose `id` is its row key.
+ */
+export type DraggedSession = Pick<SessionSummary, "id" | "cwd" | "sessionFile" | "agentId">;
 
 export const SESSION_DRAG_TYPE = "application/x-nekocode-session";
 
@@ -24,7 +27,12 @@ export function isSessionDrag(event: React.DragEvent | DragEvent): boolean {
  * than a ghost of whatever row it was picked up from.
  */
 export function startSessionDrag(event: React.DragEvent, session: DraggedSession, title: string): void {
-	current = { id: session.id, cwd: session.cwd, sessionFile: session.sessionFile };
+	current = {
+		id: session.id,
+		cwd: session.cwd,
+		sessionFile: session.sessionFile,
+		...(session.agentId ? { agentId: session.agentId } : {}),
+	};
 	event.dataTransfer.effectAllowed = "move";
 	event.dataTransfer.setData(SESSION_DRAG_TYPE, JSON.stringify(current));
 	const card = document.createElement("div");

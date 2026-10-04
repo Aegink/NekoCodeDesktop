@@ -17,7 +17,8 @@ import type {
 import type { AcpAgentDefinition } from "./agents";
 import { authenticateAgent } from "./auth";
 import { AcpConnection, AcpRpcError, AUTH_REQUIRED, METHOD_NOT_FOUND, type AcpTransport } from "./connection";
-import { AcpProjection, MODE_CONFIG_ID, MODEL_CONFIG_ID, turnUsageFromAcp } from "./projection";
+import { AcpProjection, diffPaths, MODE_CONFIG_ID, MODEL_CONFIG_ID, turnUsageFromAcp, type RawToolCall, type TextDiffer } from "./projection";
+import type { ShellChangeTracker } from "./workspace-changes";
 
 export const ACP_PROTOCOL_VERSION = 1;
 
@@ -54,6 +55,10 @@ export interface AcpSessionOptions {
 	processCwd?: string;
 	/** NekoCode's own tools, attached to the session as MCP servers. */
 	toolServers?: () => Promise<AcpToolServers>;
+	/** Line diffs for the edit cards. */
+	textDiffer?: () => Promise<TextDiffer>;
+	/** What the agent's shell commands change in the project, for cards of their own. */
+	shellChanges?: () => Promise<ShellChangeTracker | null>;
 	/** The environment the agent runs with, for choosing how it signs in. */
 	env?: Record<string, string | undefined>;
 	now?: () => number;
@@ -99,6 +104,15 @@ function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
+/** The files an edit tool call is about: its diffs, or where it says it acts. */
+function editedPaths(raw: Readonly<RawToolCall>): string[] {
+	const fromDiffs = diffPaths(raw);
+	if (fromDiffs.length > 0) return fromDiffs;
+	return (Array.isArray(raw.locations) ? raw.locations : []).flatMap((location: unknown) =>
+		isObject(location) && typeof location.path === "string" ? [location.path] : [],
+	);
+}
+
 export class AcpSession {
 	readonly id: string;
 	readonly agent: AcpAgentDefinition;
@@ -122,6 +136,10 @@ export class AcpSession {
 	/** A message has been sent; the session is a conversation now. */
 	private prompted = false;
 	private mcpServers: AcpMcpServer[] = [];
+	private shell: ShellChangeTracker | null = null;
+	private shellOpening: Promise<void> = Promise.resolve();
+	/** Commands whose changes have been looked for already. */
+	private readonly settledCommands = new Set<string>();
 
 	constructor(private readonly options: AcpSessionOptions) {
 		this.id = options.id;
@@ -139,9 +157,13 @@ export class AcpSession {
 	}
 
 	summary(): AcpSessionSummary {
+		// A resumed conversation is known by its id from the start, not once the
+		// load returns: opening it again meanwhile must find this one, and the
+		// sidebar row and split pane that show it must not change key under it.
+		const agentSessionId = this.agentSessionId ?? this.options.resume?.sessionId;
 		return {
 			id: this.id,
-			...(this.agentSessionId ? { agentSessionId: this.agentSessionId } : {}),
+			...(agentSessionId ? { agentSessionId } : {}),
 			agentId: this.agent.id,
 			agentName: this.agent.name,
 			cwd: this.cwd,
@@ -187,6 +209,18 @@ export class AcpSession {
 		}
 		const connection = new AcpConnection(transport);
 		this.connection = connection;
+		this.shellOpening = (this.options.shellChanges?.() ?? Promise.resolve(null)).then(
+			(tracker) => {
+				if (this.disposed) tracker?.dispose();
+				else this.shell = tracker;
+			},
+			() => undefined,
+		);
+		// Before any update arrives: a loaded session's replay carries edits too.
+		const differ = this.options.textDiffer?.().then(
+			(diff) => this.projection.setDiffer(diff),
+			() => undefined,
+		);
 		connection.onNotification((method, params) => this.handleNotification(method, params));
 		connection.onRequest((method, params) => this.handleRequest(method, params));
 		connection.onClose((reason) => this.handleClose(reason));
@@ -231,13 +265,14 @@ export class AcpSession {
 			};
 			if (auth?.when === "always") await authenticate();
 			if (this.disposed) return;
+			await differ;
 			await this.attachTools(capabilities);
 			if (this.disposed) return;
 			const setUp = () =>
 				this.options.resume
 					? this.reopen(connection, this.options.resume.sessionId, capabilities)
 					: withTimeout(
-							connection.request("session/new", { cwd: this.cwd, mcpServers: this.mcpServers }),
+							connection.request("session/new", this.sessionParams()),
 							STARTUP_TIMEOUT_MS,
 							`${this.agent.name} 创建会话超时`,
 						);
@@ -271,6 +306,12 @@ export class AcpSession {
 		}
 	}
 
+	/** What session/new, load and resume all take. */
+	private sessionParams(): Record<string, unknown> {
+		const meta = this.agent.bundled?.sessionMeta;
+		return { cwd: this.cwd, mcpServers: this.mcpServers, ...(meta ? { _meta: meta } : {}) };
+	}
+
 	/**
 	 * Reopen a conversation the agent already has. `session/load` replays it as
 	 * ordinary updates, which is what fills the transcript; `session/resume`
@@ -280,7 +321,7 @@ export class AcpSession {
 		// Set before the call: the replay arrives before its response does.
 		this.agentSessionId = sessionId;
 		const sessionCapabilities = isObject(capabilities.sessionCapabilities) ? capabilities.sessionCapabilities : {};
-		const params = { sessionId, cwd: this.cwd, mcpServers: this.mcpServers };
+		const params = { sessionId, ...this.sessionParams() };
 		if (capabilities.loadSession === true) {
 			const result = await withTimeout(connection.request("session/load", params), STARTUP_TIMEOUT_MS, `${this.agent.name} 加载会话超时`);
 			this.projection.finishReplay();
@@ -335,6 +376,8 @@ export class AcpSession {
 		// Nothing can call the tools any more; their token should not outlive that.
 		this.tools?.dispose();
 		this.tools = null;
+		this.shell?.dispose();
+		this.shell = null;
 		this.cancelPermissions();
 		this.changed();
 	}
@@ -343,6 +386,32 @@ export class AcpSession {
 		if (method !== "session/update" || !isObject(params)) return;
 		if (this.agentSessionId && params.sessionId !== this.agentSessionId) return;
 		if (this.projection.apply(params.update)) this.changed();
+		this.watchShell(params.update);
+	}
+
+	/**
+	 * Edits are noted so their files are not shown twice; a command that has
+	 * finished is checked for the files it changed.
+	 */
+	private watchShell(update: unknown): void {
+		const shell = this.shell;
+		if (!shell || !isObject(update)) return;
+		if (update.sessionUpdate !== "tool_call" && update.sessionUpdate !== "tool_call_update") return;
+		const toolCallId = str(update.toolCallId);
+		const raw = toolCallId ? this.projection.toolCall(toolCallId) : undefined;
+		if (!toolCallId || !raw) return;
+		const finished = raw.status === "completed" || raw.status === "failed";
+		if (raw.kind === "edit" || raw.kind === "delete" || raw.kind === "move" || diffPaths(raw).length > 0) {
+			shell.noteEdit(toolCallId, editedPaths(raw), finished);
+			return;
+		}
+		// An MCP tool Codex reports as `execute` is not a shell command.
+		if (raw.kind !== "execute" || !finished || (isObject(raw.rawInput) && typeof raw.rawInput.server === "string")) return;
+		if (this.settledCommands.has(toolCallId)) return;
+		this.settledCommands.add(toolCallId);
+		void shell.settle().then((changes) => {
+			if (!this.disposed && this.projection.addShellChanges(toolCallId, changes)) this.changed();
+		});
 	}
 
 	private async handleRequest(method: string, params: unknown): Promise<unknown> {
@@ -449,6 +518,10 @@ export class AcpSession {
 		this.status = "prompting";
 		this.changed();
 		const startedAt = this.now();
+		await this.shellOpening;
+		// Not waited on: the agent's first command comes after a model call, by
+		// which time the snapshot is long taken; and every check queues behind it.
+		void this.shell?.begin();
 		try {
 			const result = await connection.request("session/prompt", { sessionId, prompt });
 			const response = isObject(result) ? result : {};
@@ -461,6 +534,7 @@ export class AcpSession {
 			if (this.gone()) return;
 			this.projection.failTurn(errorText(error));
 		}
+		void this.shell?.end();
 		if (this.gone()) return;
 		this.cancelPermissions();
 		this.status = "ready";
@@ -496,6 +570,8 @@ export class AcpSession {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.shell?.dispose();
+		this.shell = null;
 		this.tools?.dispose();
 		this.tools = null;
 		this.cancelPermissions();

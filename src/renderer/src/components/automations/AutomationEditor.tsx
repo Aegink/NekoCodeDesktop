@@ -182,7 +182,7 @@ export function AutomationEditor({
 					<option value="">{t("automations.editor.runtimeDefault")}</option>
 					{models.map((model) => (
 						<option key={model.key} value={model.key}>
-							{modelLabel(model)}
+							{modelLabel(model, models)}
 						</option>
 					))}
 				</select>

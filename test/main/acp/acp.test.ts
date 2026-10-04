@@ -8,7 +8,7 @@ import { AcpProjection, mapToolCall, MODE_CONFIG_ID, turnUsageFromAcp } from "..
 import { AcpSession } from "../../../src/main/acp/session";
 import { AcpService, parseHistoryPage } from "../../../src/main/acp/service";
 import { AcpConfigStore } from "../../../src/main/acp/config-store";
-import { agentProxyEnv, type AcpAgentDefinition } from "../../../src/main/acp/agents";
+import { agentProxyEnv, BUILTIN_ACP_AGENTS, type AcpAgentDefinition } from "../../../src/main/acp/agents";
 import type { AcpAuthPlan } from "../../../src/main/acp/auth";
 
 type Message = Record<string, unknown>;
@@ -177,6 +177,67 @@ describe("AcpProjection", () => {
 				content: [{ type: "content", content: { type: "text", text: "Status: Approved\nAction: MCP browser_navigate\nRisk: low" } }],
 			}),
 		).toMatchObject({ toolName: "Guardian Review", args: { summary: "Status: Approved" }, status: "done" });
+	});
+
+	test("a patch across several files is a card per file, each told its own diff", () => {
+		const projection = new AcpProjection(clock);
+		projection.setDiffer((oldText, newText) => `-1 ${oldText.trim()}\n+1 ${newText.trim()}`);
+		// Codex's apply_patch: whole files before and after, CRLF and all.
+		projection.apply({
+			sessionUpdate: "tool_call",
+			toolCallId: "patch-1",
+			kind: "edit",
+			status: "in_progress",
+			content: [
+				{ type: "diff", path: "C:\\p\\a.txt", oldText: "one\r\n", newText: "ONE\r\n" },
+				{ type: "diff", path: "C:\\p\\new.txt", oldText: null, newText: "hello\n" },
+			],
+		});
+		projection.apply({ sessionUpdate: "tool_call_update", toolCallId: "patch-1", status: "completed" });
+		expect(projection.cells).toHaveLength(2);
+		expect(projection.cells[0]).toMatchObject({
+			toolCallId: "patch-1",
+			toolName: "edit",
+			args: { path: "C:\\p\\a.txt" },
+			details: { diff: "-1 one\n+1 ONE" },
+			status: "done",
+		});
+		expect(projection.cells[1]).toMatchObject({
+			toolCallId: "patch-1#1",
+			toolName: "write",
+			args: { path: "C:\\p\\new.txt", content: "hello\n" },
+			status: "done",
+		});
+	});
+
+	test("a running command shows what it has printed so far", () => {
+		const projection = new AcpProjection(clock);
+		projection.apply({ sessionUpdate: "tool_call", toolCallId: "c", kind: "execute", status: "in_progress", rawInput: { command: "make" } });
+		const delta = (data: string) => ({ sessionUpdate: "tool_call_update", toolCallId: "c", _meta: { terminal_output_delta: { data } } });
+		projection.apply(delta("building\n"));
+		projection.apply(delta("linking\n"));
+		expect(projection.cells[0]).toMatchObject({ toolName: "bash", output: "building\nlinking\n", status: "running" });
+		projection.apply({ sessionUpdate: "tool_call_update", toolCallId: "c", status: "completed", rawOutput: { formatted_output: "done\n" } });
+		expect(projection.cells[0]).toMatchObject({ output: "done\n", status: "done" });
+	});
+
+	test("files a command changed go in right under it", () => {
+		const projection = new AcpProjection(clock);
+		projection.apply({ sessionUpdate: "tool_call", toolCallId: "c", kind: "execute", status: "completed", rawInput: { command: "fmt" } });
+		projection.apply({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Formatted." } });
+		expect(projection.addShellChanges("c", [])).toBe(false);
+		expect(
+			projection.addShellChanges("c", [
+				{ path: "/p/a.ts", kind: "update", diff: "-1 a\n+1 A" },
+				{ path: "/p/b.ts", kind: "add", diff: "+1 b", content: "b" },
+			]),
+		).toBe(true);
+		expect(projection.cells.map((cell) => (cell.type === "tool" ? cell.toolName : cell.type))).toEqual(["bash", "edit", "write", "assistant"]);
+		expect(projection.cells[1]).toMatchObject({ args: { path: "/p/a.ts" }, details: { diff: "-1 a\n+1 A" }, status: "done" });
+		expect(projection.cells[2]).toMatchObject({ args: { path: "/p/b.ts", content: "b" } });
+		// A late update to the command leaves its file cards be.
+		projection.apply({ sessionUpdate: "tool_call_update", toolCallId: "c", status: "completed" });
+		expect(projection.cells).toHaveLength(4);
 	});
 
 	test("maps diffs onto the edit and write cards", () => {
@@ -690,6 +751,26 @@ describe("NekoCode tools in ACP sessions", () => {
 		expect(disposed()).toBe(1);
 	});
 
+	test("an adapter's session meta goes out with session/new", async () => {
+		const transport = new FakeTransport();
+		transport.responder = (message) => {
+			if (message.method === "initialize") transport.reply(message.id, { protocolVersion: 1, agentCapabilities: {} });
+			else if (message.method === "session/new") transport.reply(message.id, { sessionId: "s" });
+		};
+		const meta = { systemPrompt: { append: "use Edit" } };
+		const session = new AcpSession({
+			id: "local",
+			agent: { ...AGENT, bundled: { ...BUILTIN_ACP_AGENTS.find((agent) => agent.id === "claude")!.bundled!, sessionMeta: meta } },
+			cwd: "/p",
+			clientVersion: "0",
+			createTransport: () => transport,
+			onChange: () => {},
+		});
+		await session.start();
+		expect(transport.sent.find((message) => message.method === "session/new")).toMatchObject({ params: { cwd: "/p", _meta: meta } });
+		session.dispose();
+	});
+
 	test("an agent without HTTP MCP goes without, and says so", async () => {
 		const { session, transport, disposed } = toolSession({ http: false });
 		await session.start();
@@ -891,5 +972,59 @@ describe("signing in to an agent with its own CLI", () => {
 		await session.start();
 		expect(session.snapshot().status).toBe("error");
 		expect(session.snapshot().error).toContain("Fake 登录失败（cached_token）");
+	});
+});
+
+describe("shell changes in ACP sessions", () => {
+	test("a finished command gets cards for the files it changed; edit tools are noted, not shown twice", async () => {
+		const transport = new FakeTransport();
+		transport.responder = (message) => {
+			if (message.method === "initialize") transport.reply(message.id, { protocolVersion: 1, agentCapabilities: {} });
+			else if (message.method === "session/new") transport.reply(message.id, { sessionId: "s" });
+		};
+		const calls: string[] = [];
+		const tracker = {
+			begin: async () => void calls.push("begin"),
+			end: async () => void calls.push("end"),
+			noteEdit: (id: string, paths: string[], done: boolean) => void calls.push(`edit ${id} ${paths.join(",")} ${done}`),
+			settle: async () => {
+				calls.push("settle");
+				return [{ path: "/p/out.txt", kind: "add" as const, diff: "+1 hi", content: "hi" }];
+			},
+			dispose: () => void calls.push("dispose"),
+		};
+		const session = new AcpSession({
+			id: "local",
+			agent: AGENT,
+			cwd: "/p",
+			clientVersion: "0",
+			createTransport: () => transport,
+			onChange: () => {},
+			shellChanges: async () => tracker as never,
+		});
+		await session.start();
+		const turn = session.prompt("go");
+		await tick();
+		transport.update("s", { sessionUpdate: "tool_call", toolCallId: "e", kind: "edit", status: "in_progress", content: [{ type: "diff", path: "/p/a.ts", oldText: "a", newText: "b" }] });
+		transport.update("s", { sessionUpdate: "tool_call_update", toolCallId: "e", status: "completed" });
+		transport.update("s", { sessionUpdate: "tool_call", toolCallId: "c", kind: "execute", status: "in_progress", rawInput: { command: "echo hi > out.txt" } });
+		transport.update("s", { sessionUpdate: "tool_call_update", toolCallId: "c", status: "completed" });
+		// An MCP tool Codex reports as execute is not a command.
+		transport.update("s", { sessionUpdate: "tool_call", toolCallId: "m", kind: "execute", status: "completed", rawInput: { server: "nekocode", tool: "grep" } });
+		await tick();
+		await tick();
+		const prompt = transport.sent.find((message) => message.method === "session/prompt")!;
+		transport.reply(prompt.id, { stopReason: "end_turn" });
+		await turn;
+		expect(calls).toEqual(["begin", "edit e /p/a.ts false", "edit e /p/a.ts true", "settle", "end"]);
+		const tools = session.snapshot().cells.filter((cell) => cell.type === "tool");
+		expect(tools.map((cell) => [cell.toolName, cell.toolCallId])).toEqual([
+			["edit", "e"],
+			["bash", "c"],
+			["write", "c:/p/out.txt"],
+			["grep", "m"],
+		]);
+		session.dispose();
+		expect(calls.at(-1)).toBe("dispose");
 	});
 });

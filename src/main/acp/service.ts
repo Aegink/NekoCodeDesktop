@@ -33,6 +33,8 @@ import { agentLaunch, type AgentLaunch } from "./launch";
 import type { AcpConfigStore } from "./config-store";
 import { AcpConnection, type AcpTransport } from "./connection";
 import { ACP_PROTOCOL_VERSION, AcpSession, type AcpToolServers } from "./session";
+import type { TextDiffer } from "./projection";
+import { openShellChanges, type ShellChangeTracker } from "./workspace-changes";
 
 const PUSH_INTERVAL_MS = 50;
 /** A history listing keeps its agent process this long for the next one. */
@@ -62,6 +64,10 @@ export interface AcpServiceOptions {
 	findCli?: (binary: AgentBinary) => string | undefined;
 	/** NekoCode's tools for a session, served to the agent over MCP. */
 	toolServers?: (session: { sessionId: string; cwd: string }) => Promise<AcpToolServers>;
+	/** Line diffs for the edit cards; pi's, loaded on demand. */
+	textDiffer?: () => Promise<TextDiffer>;
+	/** Watches what shell commands change in a project; git-backed unless a test says otherwise. */
+	shellChanges?: (cwd: string) => Promise<ShellChangeTracker | null>;
 	createTransport?: (agent: AcpAgentDefinition, cwd: string) => AcpTransport;
 }
 
@@ -212,6 +218,9 @@ export class AcpService {
 			...(this.options.toolServers
 				? { toolServers: () => this.options.toolServers!({ sessionId: id, cwd }) }
 				: {}),
+			...(this.options.textDiffer ? { textDiffer: this.options.textDiffer } : {}),
+			// A history entry whose project is gone has no tree to watch.
+			...(processCwd ? {} : { shellChanges: () => (this.options.shellChanges ?? openShellChanges)(cwd) }),
 		});
 		this.sessions.set(id, session);
 		this.touched.set(id, Date.now());

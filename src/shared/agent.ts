@@ -24,12 +24,26 @@ export interface ModelOption {
 	name: string;
 }
 
-export function modelName(option: Pick<ModelOption, "id" | "name">): string {
-	// A built-in model carries a written-out name ("Claude Sonnet 4.5"); a
-	// configured one is registered under its id, and that is what gets trimmed.
-	return option.name.trim() && option.name !== option.id
-		? option.name
-		: (option.id.split("/").pop() ?? option.id);
+type NamedModel = Pick<ModelOption, "provider" | "id" | "name">;
+
+function lastSegment(id: string): string {
+	return id.split("/").pop() || id;
+}
+
+/**
+ * A built-in model carries a written-out name ("Claude Sonnet 4.5"); a
+ * configured one is registered under its id, and that is what gets trimmed —
+ * unless a sibling in `models` from the same provider trims to the same name:
+ * `channel-a/glm-4.6` and `channel-b/glm-4.6` keep their prefix, since the
+ * prefix is all that tells them apart.
+ */
+export function modelName(option: NamedModel, models: readonly NamedModel[] = []): string {
+	if (option.name.trim() && option.name !== option.id) return option.name;
+	const short = lastSegment(option.id);
+	const clashes = models.some(
+		(other) => other.provider === option.provider && other.id !== option.id && other.name === other.id && lastSegment(other.id) === short,
+	);
+	return clashes ? option.id : short;
 }
 
 /**
@@ -38,13 +52,15 @@ export function modelName(option: Pick<ModelOption, "id" | "name">): string {
  * A configured endpoint names its models by their raw API id, which is usually
  * a vendor-prefixed path — `zai-org/glm-4.6` — and pairing that with a provider
  * id like `nekocode-3f2a…` is a mouthful nobody reads. The provider half
- * already names the vendor, so the model half keeps only its last segment.
+ * already names the vendor, so the model half keeps only its last segment,
+ * unless `models` holds another that would read the same.
  */
 export function modelLabel(
-	option: Pick<ModelOption, "provider" | "providerName" | "id" | "name">,
+	option: NamedModel & Pick<ModelOption, "providerName">,
+	models: readonly NamedModel[] = [],
 ): string {
 	const provider = option.providerName.trim() || option.provider;
-	return `${provider}/${modelName(option)}`;
+	return `${provider}/${modelName(option, models)}`;
 }
 
 /**
@@ -167,6 +183,8 @@ export interface SessionSummary {
 	createdAt: number;
 	updatedAt: number;
 	messageCount: number;
+	/** The external agent the conversation is with; absent for NekoLocal's own. */
+	agentId?: string;
 }
 
 /**

@@ -628,7 +628,7 @@ export class QqBotService {
 		const current = peer.modelKey ?? defaults?.modelKey ?? null;
 		if (!argument) {
 			const lines = models.map(
-				(model, at) => `${model.key === current ? "▶" : " "} ${String(at + 1)}. ${modelLabel(model)}`,
+				(model, at) => `${model.key === current ? "▶" : " "} ${String(at + 1)}. ${modelLabel(model, models)}`,
 			);
 			await this.reply(
 				binding.chat,
@@ -646,7 +646,7 @@ export class QqBotService {
 		if (matches.length > 1) {
 			await this.reply(
 				binding.chat,
-				[`「${argument}」匹配到多个模型，请说得更具体：`, ...matches.map((model) => `· ${modelLabel(model)}`)].join("\n"),
+				[`「${argument}」匹配到多个模型，请说得更具体：`, ...matches.map((model) => `· ${modelLabel(model, models)}`)].join("\n"),
 				binding.replyToken,
 			);
 			return;
@@ -668,12 +668,12 @@ export class QqBotService {
 					this.log("warn", `切换模型失败：${error instanceof Error ? error.message : String(error)}`);
 				});
 		}
-		this.log("info", `${peer.label} 切换到模型 ${modelLabel(model)}`);
+		this.log("info", `${peer.label} 切换到模型 ${modelLabel(model, models)}`);
 		this.deps.onChange();
 		const levels = model.thinkingLevels ?? [];
 		await this.reply(
 			binding.chat,
-			`🧠 已切换到 ${modelLabel(model)}。${levels.length > 1 ? `\n可用思考强度：${levels.join(" / ")}，用 /think 设置。` : ""}`,
+			`🧠 已切换到 ${modelLabel(model, models)}。${levels.length > 1 ? `\n可用思考强度：${levels.join(" / ")}，用 /think 设置。` : ""}`,
 			binding.replyToken,
 		);
 	}

@@ -107,7 +107,7 @@ export function ComposerPickers(props: ComposerPickersProps) {
 		}, new Map<string, { id: string; name: string; models: ModelOption[] }>()),
 		([, group]) => group,
 	);
-	const triggerLabel = props.fusion ? "Fusion" : active ? modelLabel(active) : t("picker.noModel");
+	const triggerLabel = props.fusion ? "Fusion" : active ? modelLabel(active, models) : t("picker.noModel");
 
 	const trigger = (label: string, icon: React.ReactNode, active = false) => (
 		<Button
@@ -246,7 +246,7 @@ export function ComposerPickers(props: ComposerPickersProps) {
 													className={COMPOSER_PICKER_MENU_OPTION_CLASS_NAME}
 													value={option.key}
 												>
-													<span className="truncate">{modelName(option)}</span>
+													<span className="truncate">{modelName(option, models)}</span>
 												</MenuRadioItem>
 											))}
 										</MenuRadioGroup>

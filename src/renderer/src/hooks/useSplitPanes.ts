@@ -56,28 +56,33 @@ export interface SplitPanes {
 }
 
 /**
- * The chat area's panes: up to four sessions side by side.
+ * The chat area's panes: up to four sessions side by side, NekoLocal's and
+ * external agents' alike.
  *
- * Main still has one selected session, and every composer action goes to it,
- * so the focused pane is always the selected one; focusing another pane opens
- * its session. The others are kept current by main's `agent:paneSnapshot`.
+ * The focused pane is always the selected conversation; focusing another pane
+ * selects its session. NekoLocal's main has one selected session and every
+ * composer action goes to it, so its other panes are kept current by main's
+ * `agent:paneSnapshot`. An external agent's session takes its actions by id
+ * and needs nothing from here beyond its place in the layout.
  */
 export function useSplitPanes({
 	enabled,
 	active,
+	selected,
 	open,
 }: {
-	/** Off in the WebUI and in external-agent workspaces: both are one-session views. */
+	/** Off in the WebUI, which is a one-session view. */
 	enabled: boolean;
+	/** NekoLocal's selected session in main, whether or not it is the one on screen. */
 	active: AgentSnapshot | null;
+	/** The conversation on screen, of either kind; its `id` is what panes are matched by. */
+	selected: DraggedSession | null;
 	open: (session: DraggedSession) => Promise<void>;
 }): SplitPanes {
 	const [state, setState] = useState<PaneState>({ slots: [PRIMARY], focused: PRIMARY.key });
 	const [paneSnapshots, setPaneSnapshots] = useState<ReadonlyMap<string, AgentSnapshot>>(new Map());
 	const seq = useRef(1);
-	const activeSession: DraggedSession | null = active
-		? { id: active.session.id, cwd: active.session.cwd, sessionFile: active.session.sessionFile }
-		: null;
+	const activeSession = selected;
 	const activeId = activeSession?.id ?? null;
 	const activeIdRef = useRef(activeId);
 	activeIdRef.current = activeId;
@@ -188,7 +193,7 @@ export function useSplitPanes({
 		});
 	}, [activeId]);
 
-	// An external-agent workspace has nowhere to show panes: fold them.
+	// Somewhere with no room for panes: fold them.
 	useEffect(() => {
 		if (enabled) return;
 		setState((current) => {
@@ -234,7 +239,7 @@ export function useSplitPanes({
 
 	// Tell main which sessions to keep streaming here. Leaving panes are not
 	// among them: what they show for their last quarter second is what they had.
-	const watched = split ? live.flatMap((slot) => (slot.session ? [slot.session] : [])) : [];
+	const watched = split ? live.flatMap((slot) => (slot.session && !slot.session.agentId ? [slot.session] : [])) : [];
 	const watchKey = watched.map((session) => session.sessionFile).join("\n");
 	const everWatched = useRef(false);
 	useEffect(() => {
@@ -262,6 +267,7 @@ export function useSplitPanes({
 
 	const snapshotFor = (slot: PaneSlot): AgentSnapshot | null => {
 		if (!split && slot.leaving === undefined) return active;
+		if (slot.session?.agentId) return null;
 		const id = slot.session?.id;
 		if (!id || active?.session.id === id) return active;
 		return paneSnapshots.get(id) ?? null;

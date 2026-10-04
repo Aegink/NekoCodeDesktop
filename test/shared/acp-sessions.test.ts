@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { AcpHistoryEntry, AcpSessionSummary } from "../../src/shared/acp";
-import { acpSessionRows } from "../../src/shared/acp-sessions";
+import { acpAgentsRows, acpSessionRows } from "../../src/shared/acp-sessions";
 
 const live = (overrides: Partial<AcpSessionSummary>): AcpSessionSummary => ({
 	id: "local-1",
@@ -60,5 +60,35 @@ describe("acpSessionRows", () => {
 	test("an untitled history entry still gets a label", () => {
 		const { rows } = acpSessionRows("codex", [entry({ title: "" })], []);
 		expect(rows[0].title).toBe("未命名会话");
+	});
+
+	test("every row says which agent it belongs to", () => {
+		const { rows } = acpSessionRows("codex", [entry({ sessionId: "s2" })], [live({ agentSessionId: "s1" })]);
+		expect(rows.map((row) => row.agentId)).toEqual(["codex", "codex"]);
+	});
+});
+
+describe("acpAgentsRows", () => {
+	test("agents' conversations interleave newest first, each leading to its own agent", () => {
+		const { rows, targets } = acpAgentsRows(
+			["codex", "claude"],
+			{
+				codex: [entry({ sessionId: "c1", updatedAt: 10 })],
+				claude: [entry({ sessionId: "k1", updatedAt: 30 })],
+			},
+			[live({ id: "local-c2", agentId: "codex", agentSessionId: "c2", updatedAt: 20 })],
+		);
+		expect(rows.map((row) => [row.id, row.agentId])).toEqual([
+			["acp:claude:k1", "claude"],
+			["acp:codex:c2", "codex"],
+			["acp:codex:c1", "codex"],
+		]);
+		expect(targets.get("acp:codex:c2")).toEqual({ kind: "live", sessionId: "local-c2", agentId: "codex" });
+		expect(targets.get("acp:claude:k1")).toMatchObject({ kind: "history", agentId: "claude" });
+	});
+
+	test("an agent that is not listed brings none of its sessions", () => {
+		const { rows } = acpAgentsRows(["codex"], { claude: [entry({})] }, [live({ agentId: "claude" })]);
+		expect(rows).toEqual([]);
 	});
 });

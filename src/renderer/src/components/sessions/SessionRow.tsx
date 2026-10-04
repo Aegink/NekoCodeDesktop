@@ -21,6 +21,8 @@ export interface SessionRowProps {
 	disabled?: boolean;
 	/** The row can be carried to the chat area to open beside what is there. */
 	draggable?: boolean;
+	/** Before the title: the external agent the conversation is with. */
+	icon?: React.ReactNode;
 	session: SessionSummary;
 	active: boolean;
 	/** The active session is mid-run: the row shows a live indicator. */
@@ -156,6 +158,7 @@ export function SessionRow(props: SessionRowProps) {
 							role="img"
 						/>
 					) : null}
+					{props.icon}
 					<span className="min-w-0 flex-1 truncate text-[length:var(--app-font-size-ui-sm,11px)]">
 						{title}
 					</span>

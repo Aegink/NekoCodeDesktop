@@ -723,6 +723,9 @@ export class CellProjector {
 
 	notice(level: "info" | "warning" | "error", text: string): string {
 		const id = `notice-live-${Date.now().toString(36)}-${(this.noticeSeq++).toString(36)}`;
+		// Plugins announce themselves on every run ("81 skills loaded"), and the
+		// second time says nothing the first did not: only the latest is kept.
+		this.overlay = this.overlay.filter((c) => !(c.type === "notice" && c.level === level && c.text === text));
 		this.overlay.push({
 			id,
 			type: "notice",
@@ -782,7 +785,22 @@ export class CellProjector {
 				c.type !== "tool" ||
 				(!consumed.has(c.toolCallId) && !persistedDone.has(c.toolCallId)),
 		);
-		return [...merged, ...extra];
+		// An error the failed reply already shows does not need a line of its own
+		// as well — the retry's final error is usually exactly that.
+		const shownErrors = new Set(
+			merged.flatMap((c) => (c.type === "assistant" && c.error ? [c.error] : [])),
+		);
+		// Notices go where they happened. Appended, every one a session ever
+		// raised piled up under the latest turn, as if repeated there.
+		const cells = [...merged];
+		for (const c of extra) {
+			if (c.type !== "notice") continue;
+			if (c.level === "error" && shownErrors.has(c.text)) continue;
+			let at = cells.length;
+			while (at > 0 && cells[at - 1].timestamp > c.timestamp) at--;
+			cells.splice(at, 0, c);
+		}
+		return [...cells, ...extra.filter((c) => c.type !== "notice")];
 	}
 
 	reset(): void {

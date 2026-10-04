@@ -6,6 +6,7 @@ import type { AgentCell } from "../../../shared/agent";
 import type { CheckpointSummary } from "../../../shared/checkpoints";
 import type { ExplorerRun, WorkflowTask } from "../../../shared/workflow";
 import {
+	foldSettledTurns,
 	groupTranscriptRows,
 	workToolCount,
 	type AssistantCellData,
@@ -131,14 +132,17 @@ const CellThinking = memo(function CellThinking({ cell }: { cell: AssistantCellD
 const MessageCell = memo(function MessageCell({
 	cell,
 	closesTurn,
+	afterWork,
 	onFork,
 }: {
 	cell: AssistantCellData;
 	closesTurn: boolean;
+	/** Concludes a run of work: a rule sets the answer apart from the process above it. */
+	afterWork?: boolean;
 	onFork?: (cellId: string) => Promise<void> | void;
 }) {
 	return (
-		<div className="flex w-full flex-col gap-2">
+		<div className={cn("flex w-full flex-col gap-2", afterWork && "border-t border-border/50 pt-4")}>
 			{cell.text ? <Markdown text={cell.text} /> : null}
 			{/* Once the answer is whole: a list that reshuffles as citations stream in reads as flicker. */}
 			{cell.text && !cell.streaming ? <SourceList text={cell.text} /> : null}
@@ -438,7 +442,14 @@ function workItemSummary(item: WorkItem, t: TranslateFn): string {
 			return toolSummary(item.cell, t);
 		case "notice":
 			return item.cell.text;
+		case "message":
+			return lastThinkingLine(item.cell.text);
 	}
+}
+
+/** A remark the model made on the way, inside the run it was part of. */
+function RemarkCell({ cell }: { cell: AssistantCellData }) {
+	return cell.text ? <Markdown text={cell.text} /> : null;
 }
 
 /**
@@ -471,11 +482,11 @@ function sameWorkingBlock(
  * and the answer, under one header that can be folded away.
  *
  * Long runs produce hundreds of lines of reasoning and tool traffic, and the
- * answer they were for scrolls off the top before it is read. Open by default —
- * watching the work is the point while it runs — but one click puts a whole
- * run behind a single line, which is what makes a finished transcript
- * readable. The header sits a step above "Thinking for" in size because it
- * contains it.
+ * answer they were for scrolls off the top before it is read. Open while it
+ * runs — watching the work is the point then — and closed once it is over: a
+ * finished turn is folded into a group of its own (see `foldSettledTurns`),
+ * which mounts here collapsed, leaving the answer as the thing to read. The
+ * header sits a step above "Thinking for" in size because it contains it.
  */
 const WorkingBlock = memo(function WorkingBlock({
 	row,
@@ -489,21 +500,17 @@ const WorkingBlock = memo(function WorkingBlock({
 	waiting: boolean;
 }) {
 	const { t } = useTranslation();
-	const [open, setOpen] = useState(true);
+	const [open, setOpen] = useState(active);
 	const now = useNow(active);
 	const end = active ? now : row.endedAt;
 	const seconds = elapsedSeconds(row.startedAt, end);
 	const tools = workToolCount(row);
 	const last = row.items[row.items.length - 1];
-	// Collapsed, the header carries what it is standing in for: the step running
-	// right now while it runs, and the size of what is folded away once it stops.
-	const summary = active
-		? waiting
-			? "Planning Next Step"
-			: last
-				? workItemSummary(last, t)
-				: ""
-		: `${tools} tool ${tools === 1 ? "call" : "calls"}`;
+	// Collapsed, the block says what it is standing in for: the step running
+	// right now while it runs, under the header; once it stops, the size of what
+	// is folded away, beside it — one line, so a finished turn reads as a rule.
+	const summary = active ? (waiting ? "Planning Next Step" : last ? workItemSummary(last, t) : "") : "";
+	const size = active ? null : `${tools} tool ${tools === 1 ? "call" : "calls"}`;
 
 	return (
 		<div className="flex flex-col gap-1.5">
@@ -528,6 +535,11 @@ const WorkingBlock = memo(function WorkingBlock({
 						? `Working for ${formatElapsed(seconds)}`
 						: `Worked for ${formatElapsed(seconds)}`}
 				</span>
+				{size ? (
+					<span className="font-normal text-[length:var(--app-font-size-ui-sm,11px)] text-muted-foreground/70">
+						· {size}
+					</span>
+				) : null}
 			</button>
 			{open ? (
 				<div className="flex flex-col gap-2 border-l border-border/60 pl-3">
@@ -539,6 +551,8 @@ const WorkingBlock = memo(function WorkingBlock({
 							<CellThinking key={item.id} cell={item.cell} />
 						) : item.kind === "tool" ? (
 							<ToolCell key={item.id} cell={item.cell} active={active} />
+						) : item.kind === "message" ? (
+							<RemarkCell key={item.id} cell={item.cell} />
 						) : (
 							<NoticeCell key={item.id} cell={item.cell} />
 						);
@@ -663,7 +677,8 @@ const TranscriptView = function Transcript({
 	// Scrolling the parent can re-render the chat surface without changing the
 	// transcript. Keep this work tied to the structurally shared cell array so a
 	// scroll event does not regroup every turn in a long session.
-	const rows = useMemo(() => groupTranscriptRows(cells), [cells]);
+	const grouped = useMemo(() => groupTranscriptRows(cells), [cells]);
+	const rows = useMemo(() => foldSettledTurns(grouped, streaming === true), [grouped, streaming]);
 	// Rebuilt as cells stream, but handed on only when a title actually changed:
 	// every link in every answer reads this, and a new map per token would
 	// re-render them all.
@@ -734,6 +749,7 @@ const TranscriptView = function Transcript({
 								<MessageCell
 									cell={row.cell}
 									closesTurn={closingReplies.has(row.id)}
+									afterWork={closingReplies.has(row.id) && rows[index - 1]?.kind === "work"}
 									onFork={onForkMessage ? forkMessage : undefined}
 								/>
 							) : row.kind === "thinking" ? (

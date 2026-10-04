@@ -396,6 +396,8 @@ export const en = {
 	"sessions.title": "Sessions",
 	"sessions.workspaces": "Workspaces",
 	"sessions.addWorkspace": "Add workspace",
+	"sessions.removeWorkspace": "Remove {name} from the list",
+	"sessions.removeWorkspaceHint": "Remove from the list (sessions stay on disk; add the folder again to bring it back)",
 	"sessions.newInWorkspace": "New thread in {name}",
 	"sessions.expandWorkspace": "Expand {name}",
 	"sessions.collapseWorkspace": "Collapse {name}",

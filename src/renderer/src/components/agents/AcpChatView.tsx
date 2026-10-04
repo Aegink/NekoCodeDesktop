@@ -18,6 +18,7 @@ import { Button } from "../ui/button";
 import { Menu, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { Spinner } from "../ui/spinner";
 import { ComposerShell } from "../chat/ComposerShell";
+import { AgentIcon } from "./AgentIcon";
 import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
 import { ProjectPicker } from "../chat/ProjectPicker";
 import {
@@ -32,17 +33,26 @@ const STATUS_KEYS: Record<AcpSessionStatus, TranslationKey> = {
 	error: "acp.status.error",
 };
 
-function StatusDot({ status }: { status: AcpSessionStatus }) {
-	if (status === "starting" || status === "prompting") {
-		return <Spinner className="size-3 shrink-0 text-muted-foreground" />;
-	}
+/**
+ * The agent's own mark, with its state as a badge on the corner: a pulse while
+ * it starts or works, red once it has failed, nothing extra when it is ready.
+ */
+function AgentStatusIcon({ agent, status }: { agent: AcpAgentInfo; status: AcpSessionStatus }) {
+	const { t } = useTranslation();
+	const busy = status === "starting" || status === "prompting";
 	return (
-		<span
-			className={cn(
-				"size-1.5 shrink-0 rounded-full",
-				status === "error" ? "bg-destructive" : "bg-[var(--success)]",
-			)}
-		/>
+		<span className="relative flex shrink-0" title={`${agent.name} · ${t(STATUS_KEYS[status])}`}>
+			<AgentIcon agent={agent} className="size-3.5 text-foreground" />
+			{busy || status === "error" ? (
+				<span
+					aria-hidden
+					className={cn(
+						"absolute -right-0.5 -bottom-0.5 size-1.5 rounded-full ring-1 ring-background",
+						status === "error" ? "bg-destructive" : "animate-pulse bg-[var(--color-text-accent,var(--success))]",
+					)}
+				/>
+			) : null}
+		</span>
 	);
 }
 
@@ -174,6 +184,12 @@ interface AcpChatViewProps {
 	onAbort: () => void;
 	onSetConfig: (configId: string, value: string) => void;
 	onRespondPermission: (requestId: string, optionId: string | null) => void;
+	/** A split pane whose conversation is still being opened: not a new one. */
+	loadingSession?: boolean;
+	/** A narrow split pane: the header keeps the title and drops the path. */
+	compactHeader?: boolean;
+	/** At the header's end: a split pane's move, maximize and close controls. */
+	headerActions?: React.ReactNode;
 }
 
 /**
@@ -202,23 +218,29 @@ export function AcpChatView(props: AcpChatViewProps) {
 		[snapshot?.commands],
 	);
 	const error = snapshot?.error ?? props.error;
+	const compact = props.compactHeader === true;
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
 			<header className="flex h-11 shrink-0 items-center gap-2 border-b border-[color:var(--app-surface-divider)] px-3">
 				{snapshot && !fresh ? (
 					<div className={cn("flex min-w-0 flex-1 items-center gap-2 text-[length:var(--app-font-size-ui-sm,11px)]", MUTED_LABEL_TEXT_CLASS_NAME)}>
-						<StatusDot status={snapshot.status} />
+						<AgentStatusIcon agent={agent} status={snapshot.status} />
 						<span className="shrink-0 font-medium text-foreground">{agent.name}</span>
-						<span className="min-w-0 truncate text-foreground">{snapshot.title}</span>
-						<span className="min-w-0 flex-1 truncate" title={snapshot.cwd}>
-							{snapshot.cwd}
-						</span>
-						<span className="shrink-0">{t(STATUS_KEYS[snapshot.status])}</span>
+						<span className={cn("min-w-0 truncate text-foreground", compact && "flex-1")}>{snapshot.title}</span>
+						{compact ? null : (
+							<span className="min-w-0 flex-1 truncate" title={snapshot.cwd}>
+								{snapshot.cwd}
+							</span>
+						)}
+						{compact ? null : <span className="shrink-0">{t(STATUS_KEYS[snapshot.status])}</span>}
 					</div>
+				) : props.loadingSession ? (
+					<div className="min-w-0 flex-1" />
 				) : (
 					<ProjectPicker cwd={props.cwd} onPickProject={props.onPickProject} />
 				)}
+				{props.headerActions}
 			</header>
 			{error ? (
 				<div className="flex items-start gap-2 border-b border-[color:var(--app-surface-divider)] bg-destructive/6 px-3 py-1.5 text-[length:var(--app-font-size-ui-sm,11px)] text-destructive">
@@ -242,6 +264,10 @@ export function AcpChatView(props: AcpChatViewProps) {
 						) : null}
 						<Transcript cells={snapshot.cells} streaming={snapshot.streaming} />
 					</div>
+				</div>
+			) : props.loadingSession ? (
+				<div className="flex min-h-0 flex-1 items-center justify-center">
+					<Spinner className="size-4 text-muted-foreground" />
 				</div>
 			) : (
 				<div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">

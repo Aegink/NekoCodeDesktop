@@ -73,4 +73,35 @@ describe("auto-retry notices", () => {
 		projector.handleEvent({ type: "auto_retry_end", success: true, attempt: 1 });
 		expect(notices(projector)).toEqual(["hello"]);
 	});
+
+	test("a final error the failed reply already shows is not repeated", () => {
+		const projector = new CellProjector();
+		projector.rebuild([
+			{ role: "user", content: "hi", timestamp: 1 },
+			{ role: "assistant", stopReason: "error", errorMessage: "429 rate limited", content: [], timestamp: 2 },
+		]);
+		projector.handleEvent({ type: "auto_retry_end", success: false, attempt: 3, finalError: "429 rate limited" });
+		expect(notices(projector)).toEqual([]);
+	});
+});
+
+describe("live notices", () => {
+	test("a repeated notice is kept once, at its latest", () => {
+		const projector = new CellProjector();
+		projector.notice("info", "81 skills loaded");
+		projector.notice("info", "memory updated");
+		projector.notice("info", "81 skills loaded");
+		expect(notices(projector)).toEqual(["memory updated", "81 skills loaded"]);
+	});
+
+	test("sit where they happened rather than under the latest turn", () => {
+		const projector = new CellProjector();
+		const now = Date.now();
+		projector.notice("info", "skills loaded");
+		projector.rebuild([
+			{ role: "user", content: "first", timestamp: now - 10_000 },
+			{ role: "user", content: "second", timestamp: now + 10_000 },
+		]);
+		expect(projector.cells().map((c) => (c.type === "notice" ? "notice" : c.type))).toEqual(["user", "notice", "user"]);
+	});
 });

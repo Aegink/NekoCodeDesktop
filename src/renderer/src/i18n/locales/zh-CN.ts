@@ -393,6 +393,8 @@ export const zhCN: Record<TranslationKey, string> = {
 	"sessions.title": "会话",
 	"sessions.workspaces": "工作区",
 	"sessions.addWorkspace": "添加工作区",
+	"sessions.removeWorkspace": "从列表移除 {name}",
+	"sessions.removeWorkspaceHint": "从列表移除（会话文件保留，重新添加该文件夹即可恢复）",
 	"sessions.newInWorkspace": "在 {name} 中新建会话",
 	"sessions.expandWorkspace": "展开 {name}",
 	"sessions.collapseWorkspace": "折叠 {name}",

@@ -18,7 +18,19 @@ export interface BundledAdapter {
 	binaryEnv: string;
 	cliName: string;
 	installHint: string;
+	/** Adapter-specific `_meta` sent with session/new, load and resume. */
+	sessionMeta?: Record<string, unknown>;
 }
+
+/**
+ * Claude edits files through its shell now and then — a Python heredoc, `sed`,
+ * `Set-Content`. To ACP that is a command like any other: no diff reaches the
+ * client, and the transcript shows nothing of the change. Its Edit and Write
+ * calls do carry one.
+ */
+const CLAUDE_FILE_TOOLS_PROMPT =
+	"This session runs inside NekoCode, which shows the user a diff for every Edit and Write call but sees nothing of what a shell command changes. " +
+	"Make every change to a file with the Edit or Write tool, including many replacements in one file; never edit files through Bash (sed, awk, python or node scripts, heredocs, Set-Content, Out-File, redirection).";
 
 /**
  * An agent whose own CLI speaks ACP, so NekoCode starts it directly — found on
@@ -89,6 +101,8 @@ export const BUILTIN_ACP_AGENTS: readonly AcpAgentDefinition[] = [
 			binaryEnv: "CLAUDE_CODE_EXECUTABLE",
 			cliName: "Claude Code",
 			installHint: "按 https://code.claude.com 的说明安装 Claude Code（原生安装器），然后运行 claude 登录",
+			// claude-agent-acp appends this to Claude Code's own system prompt.
+			sessionMeta: { systemPrompt: { append: CLAUDE_FILE_TOOLS_PROMPT } },
 		},
 	},
 	{

@@ -24,6 +24,7 @@ import { AcpChatView } from "./components/agents/AcpChatView";
 import { WorkspacePicker, workspaceName } from "./components/agents/WorkspacePicker";
 import { NEKO_LOCAL_WORKSPACE } from "../../shared/acp";
 import { useAcpWorkspace } from "./hooks/useAcpWorkspace";
+import { useAcpPanes } from "./hooks/useAcpPanes";
 import { ChatView } from "./components/ChatView";
 import { CheckpointRestoreDialog } from "./components/chat/CheckpointRestoreDialog";
 import {
@@ -70,6 +71,8 @@ const IdeLayout = lazy(() => import("./components/ide/IdeLayout"));
 
 const PROJECT_STORAGE_KEY = "nekocode:project-cwd";
 const WORKSPACES_STORAGE_KEY = "nekocode:workspaces";
+/** Workspace keys removed from the sidebar; their sessions stay on disk. */
+const HIDDEN_WORKSPACES_STORAGE_KEY = "nekocode:hidden-workspaces";
 const DOCK_WIDTH_STORAGE_KEY = "nekocode:dock-width";
 const DOCK_OPEN_STORAGE_KEY = "nekocode:dock-open";
 const SIDEBAR_OPEN_STORAGE_KEY = "nekocode:sidebar-open";
@@ -89,6 +92,15 @@ function readStored(key: string): string | null {
 		return localStorage.getItem(key);
 	} catch {
 		return null;
+	}
+}
+
+function readStoredPaths(key: string): string[] {
+	try {
+		const value: unknown = JSON.parse(readStored(key) ?? "[]");
+		return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && !!entry.trim()) : [];
+	} catch {
+		return [];
 	}
 }
 
@@ -150,20 +162,44 @@ export default function App() {
 			writeStored(AGENT_WORKSPACE_STORAGE_KEY, NEKO_LOCAL_WORKSPACE);
 		}
 	}, [workspace, acp.agents]);
-	const [workspaces, setWorkspaces] = useState<string[]>(() => {
-		try {
-			const value: unknown = JSON.parse(readStored(WORKSPACES_STORAGE_KEY) ?? "[]");
-			return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string" && !!entry.trim()) : [];
-		} catch { return []; }
-	});
-	useEffect(() => {
-		if (!cwd) return;
+	const [workspaces, setWorkspaces] = useState<string[]>(() => readStoredPaths(WORKSPACES_STORAGE_KEY));
+	const [hiddenWorkspaces, setHiddenWorkspaces] = useState<string[]>(() => readStoredPaths(HIDDEN_WORKSPACES_STORAGE_KEY));
+	const hiddenWorkspacesRef = useRef(hiddenWorkspaces);
+	hiddenWorkspacesRef.current = hiddenWorkspaces;
+	const updateHiddenWorkspaces = (update: (previous: string[]) => string[]) =>
+		setHiddenWorkspaces((previous) => {
+			const next = update(previous);
+			if (next === previous) return previous;
+			writeStored(HIDDEN_WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+			return next;
+		});
+	const listWorkspace = (path: string) =>
 		setWorkspaces((previous) => {
-			if (previous.some((path) => workspaceKey(path) === workspaceKey(cwd))) return previous;
-			const next = [...previous, cwd];
+			if (previous.some((entry) => workspaceKey(entry) === workspaceKey(path))) return previous;
+			const next = [...previous, path];
 			writeStored(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
 			return next;
 		});
+	/** Back in the sidebar: the user picked this folder or started work in it. */
+	const revealWorkspace = (path: string) => {
+		const key = workspaceKey(path);
+		updateHiddenWorkspaces((previous) => (previous.includes(key) ? previous.filter((entry) => entry !== key) : previous));
+		listWorkspace(path);
+	};
+	/** Off the sidebar, sessions and all, until it is picked again; nothing on disk is touched. */
+	const removeWorkspace = (path: string) => {
+		const key = workspaceKey(path);
+		setWorkspaces((previous) => {
+			const next = previous.filter((entry) => workspaceKey(entry) !== key);
+			writeStored(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+			return next;
+		});
+		updateHiddenWorkspaces((previous) => (previous.includes(key) ? previous : [...previous, key]));
+	};
+	// A directory the app lands in — a restore, a task opened from the board —
+	// joins the list, unless the user removed it.
+	useEffect(() => {
+		if (cwd && !hiddenWorkspacesRef.current.includes(workspaceKey(cwd))) listWorkspace(cwd);
 	}, [cwd]);
 	const [snapshot, setSnapshot] = useState<AgentSnapshot | null>(null);
 	/**
@@ -175,13 +211,56 @@ export default function App() {
 	const showSnapshot = (next: AgentSnapshot | null) =>
 		setSnapshot((previous) => (next ? shareStructure(previous, next) : null));
 	const openSessionRef = useRef<(session: Pick<SessionSummary, "cwd" | "sessionFile">) => Promise<void>>(async () => undefined);
-	/** Up to four sessions side by side; see useSplitPanes. Opens through a ref, as `openSession` comes later. */
-	const openPaneSession = useCallback((session: DraggedSession) => openSessionRef.current(session), []);
+	const selectSessionRef = useRef<(session: DraggedSession) => Promise<void>>(async () => undefined);
+	/**
+	 * The conversation on screen, whichever agent it is with. An ACP one goes by
+	 * its sidebar row key, which is what the split panes and the drag carry.
+	 */
+	const selected: DraggedSession | null = acpActive
+		? acp.activeRowId && acp.snapshot
+			? { id: acp.activeRowId, cwd: acp.snapshot.cwd, sessionFile: acp.activeRowId, agentId: acp.snapshot.agentId }
+			: null
+		: snapshot
+			? { id: snapshot.session.id, cwd: snapshot.session.cwd, sessionFile: snapshot.session.sessionFile }
+			: null;
+	/** Up to four sessions side by side; see useSplitPanes. Opens through a ref, as `selectSession` comes later. */
+	const openPaneSession = useCallback((session: DraggedSession) => selectSessionRef.current(session), []);
 	const panes = useSplitPanes({
-		enabled: api.runtime === "electron" && !acpActive,
+		enabled: api.runtime === "electron",
 		active: snapshot,
+		selected,
 		open: openPaneSession,
 	});
+	// External agents' conversations in panes beside the selected one.
+	const acpPanes = useAcpPanes(
+		panes.slots.flatMap((slot) => {
+			if (!slot.session?.agentId || (!panes.split && slot.leaving === undefined)) return [];
+			const live = acp.liveId(slot.session.id);
+			return live ? [live] : [];
+		}),
+	);
+	// A pane's conversation that is not open — dropped in from the agent's
+	// history, or closed as idle while it sat there — is opened again, without
+	// being selected.
+	const unopenedPanes = panes.split
+		? panes.live.flatMap((slot) => (slot.session?.agentId && !acp.liveId(slot.session.id) ? [slot.session.id] : []))
+		: [];
+	const unopenedKey = unopenedPanes.join("\n");
+	useEffect(() => {
+		for (const id of unopenedPanes) void acp.ensureLive(id);
+	}, [unopenedKey, acp.rows.length]);
+	// An agent switched off or removed takes its panes with it, one at a time.
+	const orphanPane = panes.split
+		? panes.live.find(
+				(slot) =>
+					slot.session?.agentId &&
+					acp.agents.length > 0 &&
+					!acp.agents.some((agent) => agent.id === slot.session?.agentId && agent.enabled),
+			)
+		: undefined;
+	useEffect(() => {
+		if (orphanPane?.session) panes.forget(orphanPane.session.id);
+	}, [orphanPane?.key]);
 	const [browserPreview, setBrowserPreview] = useState<BrowserPreviewRequest | null>(null);
 	const [composerInsertion, setComposerInsertion] = useState<ComposerInsertion | null>(null);
 	// The conversation on screen owns the browser panel: a preview from a
@@ -375,6 +454,8 @@ export default function App() {
 		() => mergeActiveSession(sessions.sessions, snapshot?.session),
 		[sessions.sessions, snapshot?.session],
 	);
+	/** NekoLocal's sessions and every enabled agent's, grouped by project in one list. */
+	const allRows = useMemo(() => [...sessionRows, ...acp.rows], [sessionRows, acp.rows]);
 
 	// The open session owns the project path, and a snapshot can arrive without
 	// anyone here having opened it: a restore on launch, a background task made
@@ -510,6 +591,7 @@ export default function App() {
 
 	/** Point the app at a project; in an agent workspace that also means a new conversation there. */
 	const switchProject = (path: string) => {
+		revealWorkspace(path);
 		setCwd(path);
 		writeStored(PROJECT_STORAGE_KEY, path);
 		acp.startNew();
@@ -526,13 +608,17 @@ export default function App() {
 		} catch (cause) { setError(errorMessage(cause)); }
 	};
 
-	const openAcpSession = (row: SessionSummary) => {
+	/** Open an agent's conversation, making that agent the workspace. */
+	const openAcpSession = async (row: DraggedSession) => {
+		if (!row.agentId) return;
 		if (row.cwd) {
 			setCwd(row.cwd);
 			writeStored(PROJECT_STORAGE_KEY, row.cwd);
 		}
-		setView("chat");
-		void acp.open(row);
+		// In the same update as the open: the agent being left must not see the
+		// new directory on its own and start a fresh conversation there.
+		setWorkspace(row.agentId);
+		await acp.open(row);
 	};
 
 	const workspacePicker =
@@ -573,6 +659,30 @@ export default function App() {
 	openSessionRef.current = openSession;
 
 	/**
+	 * Put any conversation on screen — NekoLocal's or an agent's — switching the
+	 * workspace to whichever it belongs to. The sidebar and the split panes
+	 * share it, since both hold the two kinds together.
+	 */
+	const selectSession = async (session: DraggedSession) => {
+		if (session.agentId) return openAcpSession(session);
+		if (snapshot?.session.id !== session.id) await openSession(session);
+		// Only once it is open: until then the workspace still shows the one being left.
+		setWorkspace(NEKO_LOCAL_WORKSPACE);
+	};
+	selectSessionRef.current = selectSession;
+
+	/** A sidebar row: a conversation already in a split pane is focused there. */
+	const openRow = (row: SessionSummary) => {
+		const pane = panes.split ? panes.live.find((slot) => slot.session?.id === row.id) : undefined;
+		if (pane) {
+			setView("chat");
+			panes.focus(pane.key);
+			return;
+		}
+		void selectSession(row);
+	};
+
+	/**
 	 * Branch at a reply and go to the branch — the same arrival as opening a
 	 * session from the sidebar, which is where the original stays waiting.
 	 */
@@ -601,6 +711,7 @@ export default function App() {
 			// A session opened from the sidebar meanwhile is the one on screen now;
 			// the caller must not go on to prompt the one it is replacing.
 			if (seq !== transitionSeq.current) return false;
+			revealWorkspace(next.session.cwd);
 			setCwd(next.session.cwd);
 			writeStored(PROJECT_STORAGE_KEY, next.session.cwd);
 			showSnapshot(next);
@@ -794,7 +905,9 @@ export default function App() {
 	 */
 	const renderPaneChat = (slot: PaneSlot) => {
 		const focused = slot.leaving === undefined && slot.key === panes.focused;
-		if (acpActive && acp.agent && focused) {
+		const split = panes.split;
+		if (slot.session?.agentId && (split || slot.leaving !== undefined)) return renderAcpPane(slot, slot.session, focused);
+		if (acpActive && acp.agent && focused && !split) {
 			return (
 				<AcpChatView
 					insertion={composerInsertion}
@@ -817,7 +930,6 @@ export default function App() {
 				/>
 			);
 		}
-		const split = panes.split;
 		const paneSnapshot = panes.snapshotFor(slot);
 		const sessionCwd = paneSnapshot?.session.cwd ?? cwd;
 		/** Run an action once this pane's session is the selected one. */
@@ -895,6 +1007,62 @@ export default function App() {
 		);
 	};
 
+	/**
+	 * An external agent's conversation in a split pane. Its actions name the
+	 * session, so unlike a NekoLocal pane it acts without being selected first.
+	 */
+	const renderAcpPane = (slot: PaneSlot, session: DraggedSession, focused: boolean) => {
+		const agent = acp.agents.find((entry) => entry.id === session.agentId);
+		if (!agent) return null;
+		const sessionId = acp.liveId(session.id);
+		const paneSnapshot = sessionId
+			? acp.snapshot?.id === sessionId
+				? acp.snapshot
+				: acpPanes.snapshot(sessionId)
+			: null;
+		const act = (action: (id: string) => Promise<unknown>) => {
+			if (sessionId) acpPanes.run(sessionId, () => action(sessionId));
+		};
+		return (
+			<AcpChatView
+				agent={agent}
+				insertion={focused ? composerInsertion : null}
+				onInsertionConsumed={(id) => setComposerInsertion((current) => (current?.id === id ? null : current))}
+				composerHeader={undefined}
+				cwd={paneSnapshot?.cwd ?? session.cwd}
+				error={sessionId ? acpPanes.error(sessionId) : null}
+				historyError={null}
+				loadingSession={!paneSnapshot}
+				onAbort={() => act((id) => api.acpCancel(id))}
+				onDismissError={() => {
+					if (sessionId) acpPanes.dismissError(sessionId);
+				}}
+				onPickProject={pickProject}
+				onRespondPermission={(requestId, optionId) =>
+					act((id) => api.acpRespondPermission({ sessionId: id, requestId, optionId }))
+				}
+				onSend={(request) =>
+					act((id) =>
+						api.acpPrompt({ sessionId: id, text: request.text, ...(request.images?.length ? { images: request.images } : {}) }),
+					)
+				}
+				onSetConfig={(configId, value) => act((id) => api.acpSetConfig({ sessionId: id, configId, value }))}
+				snapshot={paneSnapshot}
+				compactHeader={panes.split && layoutMode === "agent"}
+				headerActions={
+					panes.split && layoutMode === "agent" ? (
+						<PaneControls
+							session={session}
+							title={paneSnapshot?.title ?? ""}
+							onMaximize={() => panes.maximize(slot.key)}
+							onClose={() => panes.close(slot.key)}
+						/>
+					) : undefined
+				}
+			/>
+		);
+	};
+
 	// A pane that is gone takes its host with it.
 	const slotKeys = panes.slots.map((slot) => slot.key).join(",");
 	useEffect(() => {
@@ -904,7 +1072,7 @@ export default function App() {
 
 	const dropSession = (session: DraggedSession, plan: DropPlan) => {
 		// Onto the welcome screen, or the one pane already showing it: nothing to split.
-		if (plan.order.length < 2) void openSession(session);
+		if (plan.order.length < 2) void selectSession(session);
 		else panes.drop(session, plan);
 	};
 
@@ -964,13 +1132,14 @@ export default function App() {
 					<Sidebar
 						cwd={cwd}
 						workspaces={workspaces}
-						sessions={acpActive ? acp.rows : sessionRows}
-						sessionsLoading={acpActive ? acp.loading : sessions.loading}
-						workspaceName={workspaceName(acpActive ? workspace : NEKO_LOCAL_WORKSPACE, acp.agents)}
-						sessionsReadOnly={acpActive}
-						sessionsDraggable={api.runtime === "electron" && !acpActive}
-						activeSessionId={acpActive ? acp.activeRowId : (snapshot?.session.id ?? null)}
-						streaming={acpActive ? (acp.snapshot?.streaming ?? false) : (snapshot?.streaming ?? false)}
+						hiddenWorkspaces={hiddenWorkspaces}
+						onRemoveWorkspace={removeWorkspace}
+						sessions={allRows}
+						sessionsLoading={sessions.loading || acp.loading}
+						agents={acp.agents}
+						sessionsDraggable={api.runtime === "electron"}
+						activeSessionId={selected?.id ?? null}
+						streaming={streamingNow}
 						activeTasks={activeTaskCount(taskBoard)}
 						view={view}
 						busy={busy}
@@ -984,12 +1153,12 @@ export default function App() {
 							setView("chat");
 						}}
 						onNewWorkspaceSession={(path) => (acpActive ? switchProject(path) : void createSession(path))}
-						onOpenSession={acpActive ? openAcpSession : openSession}
+						onOpenSession={openRow}
 						onRenameSession={(session, title) => {
-							if (!acpActive) void sessions.rename(session, title);
+							if (!session.agentId) void sessions.rename(session, title);
 						}}
 						onDeleteSession={(session) => {
-							if (acpActive) return;
+							if (session.agentId) return;
 							panes.forget(session.id);
 							void sessions.remove(session);
 						}}
@@ -1045,11 +1214,11 @@ export default function App() {
 							sessions={
 								panes.split
 									? panes.live.flatMap((slot) => (slot.session ? [slot.session.id] : []))
-									: snapshot && !acpActive
-										? [snapshot.session.id]
+									: selected && !(acpActive && acp.snapshot?.pristine)
+										? [selected.id]
 										: []
 							}
-							acceptDrops={api.runtime === "electron" && !acpActive}
+							acceptDrops={api.runtime === "electron"}
 							renderPane={(slot) => <ChatSlot host={hostFor(slot.key)} active={layoutMode === "agent"} />}
 							onFocus={panes.focus}
 							onDrop={dropSession}
@@ -1140,9 +1309,9 @@ export default function App() {
 							streaming={streamingNow}
 							agentActivity={agentActivity}
 							openFileRequest={ideOpenFile}
-							sessions={acpActive ? acp.rows : sessionRows}
-							activeSessionId={acpActive ? acp.activeRowId : (snapshot?.session.id ?? null)}
-							onOpenSession={(session) => (acpActive ? openAcpSession(session) : void openSession(session))}
+							sessions={allRows}
+							activeSessionId={selected?.id ?? null}
+							onOpenSession={openRow}
 							onNewSession={() => {
 								if (!acpActive) return void createSession();
 								acp.startNew();

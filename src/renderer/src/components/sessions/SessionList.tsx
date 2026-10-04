@@ -28,23 +28,27 @@ export interface SessionListProps {
 	loading: boolean;
 	currentCwd: string | null;
 	workspaces: string[];
+	/** Workspace keys removed from the list; their groups are not drawn. */
+	hiddenWorkspaces?: string[];
 	homeDir?: string;
 	busy: boolean;
 	onAddWorkspace: () => void;
+	/** Takes a workspace off the list; its sessions stay on disk. */
+	onRemoveWorkspace?: (cwd: string) => void;
 	onNewSession: (cwd: string) => void;
 	onOpen: (session: SessionSummary) => void;
 	onRename: (session: SessionSummary, title: string) => void;
 	onDelete: (session: SessionSummary) => void;
-	/** Which workspace's history this is, shown beside the heading. */
-	caption?: string;
-	/** Rows that open but have no rename or delete. */
-	readOnly?: boolean;
 	/** Rows can be dragged into the chat area's split view. */
 	draggable?: boolean;
+	/** Drawn before a row's title: which external agent the conversation is with. */
+	rowIcon?: (session: SessionSummary) => React.ReactNode;
 }
 
 /**
  * Workspace folders with nested threads, remembered folding, and global search.
+ * NekoLocal's sessions and external agents' share the folders: a project is
+ * one place in the list whichever agent the conversation was with.
  *
  * Grouping and filtering live in `shared/sessions` so workspace boundaries are
  * tested directly; this component only decides what to draw.
@@ -75,8 +79,8 @@ export function SessionList(props: SessionListProps) {
 	}, [activeWorkspace, activeId]);
 
 	const groups = useMemo(
-		() => groupSessionsByWorkspace(sessions, { currentCwd, workspaces: props.workspaces, homeDir: props.homeDir, query }),
-		[sessions, currentCwd, props.workspaces, props.homeDir, query],
+		() => groupSessionsByWorkspace(sessions, { currentCwd, workspaces: props.workspaces, hidden: props.hiddenWorkspaces, homeDir: props.homeDir, query }),
+		[sessions, currentCwd, props.workspaces, props.hiddenWorkspaces, props.homeDir, query],
 	);
 
 	/**
@@ -107,7 +111,6 @@ export function SessionList(props: SessionListProps) {
 			<div className="flex items-center justify-between px-2">
 				<span className={cn(SIDEBAR_SECTION_LABEL_CLASS_NAME, "min-w-0 truncate")}>
 					{t("sessions.workspaces")}
-					{props.caption ? <span className="font-normal opacity-70"> · {props.caption}</span> : null}
 				</span>
 				<Button size="icon-xs" variant="ghost" disabled={props.busy} onClick={props.onAddWorkspace} aria-label={t("sessions.addWorkspace")} title={t("sessions.addWorkspace")}><PlusIcon className="size-3.5" /></Button>
 			</div>
@@ -177,13 +180,20 @@ export function SessionList(props: SessionListProps) {
 									className="mr-1 opacity-0 group-hover/project-header:opacity-100 group-focus-within/project-header:opacity-100 focus-visible:opacity-100">
 									<PlusIcon className="size-3.5" />
 								</Button> : null}
+								{group.cwd && props.onRemoveWorkspace ? <Button size="icon-xs" variant="ghost" disabled={props.busy} onClick={() => props.onRemoveWorkspace?.(group.cwd)}
+									aria-label={t("sessions.removeWorkspace", { name })} title={t("sessions.removeWorkspaceHint")}
+									className="mr-1 opacity-0 group-hover/project-header:opacity-100 group-focus-within/project-header:opacity-100 focus-visible:opacity-100">
+									<XIcon className="size-3.5" />
+								</Button> : null}
 							</div>
 							{!folded ? <div className="ml-5 flex flex-col gap-0.5 border-l border-[color:var(--sidebar-border)] pl-1">
 							{shown.length === 0 ? <EmptyNote>{t(loading ? "sessions.loading" : "sessions.workspaceEmpty")}</EmptyNote> : null}
 							{shown.map((session) => (
 								<SessionRow
 									compact
-									hideActions={props.readOnly}
+									// An external agent's history is its own: rows open, but are not renamed or deleted here.
+									hideActions={!!session.agentId}
+									icon={props.rowIcon?.(session)}
 									draggable={props.draggable}
 									disabled={props.busy}
 									active={session.id === activeId}

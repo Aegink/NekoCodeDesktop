@@ -54,6 +54,7 @@ export function acpSessionRows(
 			updatedAt: listed ? listed.updatedAt : session.updatedAt,
 			messageCount: 0,
 			running: session.status === "prompting" || session.status === "starting",
+			agentId,
 		});
 	}
 	for (const entry of history) {
@@ -70,7 +71,32 @@ export function acpSessionRows(
 			createdAt: entry.updatedAt,
 			updatedAt: entry.updatedAt,
 			messageCount: 0,
+			agentId,
 		});
+	}
+	rows.sort((a, b) => b.updatedAt - a.updatedAt);
+	return { rows, targets };
+}
+
+/** Where a row of any agent leads, and whose it is. */
+export type AcpAgentRowTarget = AcpRowTarget & { agentId: string };
+
+/**
+ * Every listed agent's conversations together, for the one sidebar they share
+ * with NekoLocal's sessions. Each row carries its `agentId`, which is what tells
+ * the sidebar and the split view which kind of conversation it is.
+ */
+export function acpAgentsRows(
+	agentIds: readonly string[],
+	histories: Readonly<Record<string, readonly AcpHistoryEntry[] | undefined>>,
+	live: readonly AcpSessionSummary[],
+): { rows: SessionSummary[]; targets: Map<string, AcpAgentRowTarget> } {
+	const targets = new Map<string, AcpAgentRowTarget>();
+	const rows: SessionSummary[] = [];
+	for (const agentId of agentIds) {
+		const own = acpSessionRows(agentId, histories[agentId] ?? [], live);
+		rows.push(...own.rows);
+		for (const [key, target] of own.targets) targets.set(key, { ...target, agentId });
 	}
 	rows.sort((a, b) => b.updatedAt - a.updatedAt);
 	return { rows, targets };

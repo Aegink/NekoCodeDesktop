@@ -16,7 +16,8 @@ type Device = LanDevice & { tokenHash: string };
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 class HttpError extends Error { constructor(readonly status: number, message: string) { super(message); } }
 
-/** Explicitly enabled LAN gateway. No Electron IPC or arbitrary filesystem API is exposed. */
+/** Explicitly enabled LAN gateway. No Electron IPC or arbitrary filesystem API is exposed.
+ * Once the user turns it on it stays on across launches until they turn it off. */
 export class LanService {
 	private server: Server | null = null;
 	private devices: Device[] = [];
@@ -27,6 +28,8 @@ export class LanService {
 	private pairAttempts: number[] = [];
 	private submissions = new Map<string, { digest: string; result: Promise<unknown> }>();
 	private starting: Promise<LanStatus> | null = null;
+	/** The user's choice, persisted; `server` is only whether it is listening right now. */
+	private enabled = false;
 	private readonly file: string;
 
 	constructor(userData: string, private tasks: TaskManager) {
@@ -36,7 +39,8 @@ export class LanService {
 			const saved = JSON.parse(readFileSync(this.file, "utf8"));
 			this.devices = (saved.devices ?? []).filter((d: Device) => typeof d.id === "string" && typeof d.name === "string" && /^[a-f0-9]{64}$/.test(d.tokenHash));
 			this.projects = (saved.projects ?? []).filter((p: LanProject) => typeof p.id === "string" && typeof p.path === "string");
-		} catch { /* First launch; binding is disabled on every app launch. */ }
+			this.enabled = saved.enabled === true;
+		} catch { /* First launch: off until the user turns it on. */ }
 	}
 
 	status(): LanStatus {
@@ -46,6 +50,23 @@ export class LanService {
 			devices: this.devices.map(({ tokenHash: _, ...device }) => device),
 			projects: this.projects.map((p) => ({ ...p })),
 		};
+	}
+
+	/** The user's switch. Remembered only once it took effect, so a port that was
+	 * busy doesn't leave the app retrying it on every launch. */
+	async setEnabled(enabled: boolean, port = 47832): Promise<LanStatus> {
+		if (!enabled) {
+			this.enabled = false; this.save();
+			return this.stop();
+		}
+		const status = await this.start(port);
+		this.enabled = true; this.save();
+		return status;
+	}
+
+	/** Brings the server back at launch if the user left it on. */
+	async restore(port = 47832): Promise<void> {
+		if (this.enabled) await this.start(port);
 	}
 
 	start(port = 47832): Promise<LanStatus> {
@@ -78,6 +99,7 @@ export class LanService {
 		return this.status();
 	}
 
+	/** Stops listening without touching the user's choice — shutdown goes through here too. */
 	async stop(): Promise<LanStatus> {
 		if (this.starting) await this.starting.catch(() => undefined);
 		const server = this.server;
@@ -117,7 +139,7 @@ export class LanService {
 
 	private save(): void {
 		const temp = this.file + ".tmp";
-		writeFileSync(temp, JSON.stringify({ devices: this.devices, projects: this.projects }), { mode: 0o600 });
+		writeFileSync(temp, JSON.stringify({ enabled: this.enabled, devices: this.devices, projects: this.projects }), { mode: 0o600 });
 		renameSync(temp, this.file);
 	}
 

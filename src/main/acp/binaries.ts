@@ -12,7 +12,7 @@
  * installed through npm is a `.cmd` shim that needs Node, so beyond PATH each
  * lookup also knows where the usual installers put the real executable.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -37,8 +37,16 @@ export function nodeProbe(): ExecutableProbe {
 		isFile: (path) => {
 			try {
 				return statSync(path).isFile();
-			} catch {
-				return false;
+			} catch (error) {
+				// A Microsoft Store install (PowerShell 7, Python) is an app execution
+				// alias in WindowsApps: a reparse point stat cannot follow, yet it
+				// launches like any exe.
+				if (process.platform !== "win32" || (error as NodeJS.ErrnoException).code !== "EACCES") return false;
+				try {
+					return lstatSync(path).isSymbolicLink();
+				} catch {
+					return false;
+				}
 			}
 		},
 		subdirectories: (path) => {

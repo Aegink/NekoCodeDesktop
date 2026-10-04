@@ -9,7 +9,9 @@ export type NoticeCellData = Extract<AgentCell, { type: "notice" }>;
 export type WorkItem =
 	| { kind: "thinking"; id: string; cell: AssistantCellData }
 	| { kind: "tool"; id: string; cell: ToolCellData }
-	| { kind: "notice"; id: string; cell: NoticeCellData };
+	| { kind: "notice"; id: string; cell: NoticeCellData }
+	/** A remark made on the way, folded in once the turn's real answer has landed. */
+	| { kind: "message"; id: string; cell: AssistantCellData };
 
 /**
  * A run of reasoning and tool calls between two things the user reads: the
@@ -72,7 +74,7 @@ function unwrapped(row: WorkRow): TranscriptRow[] | null {
 	for (const item of row.items) {
 		if (item.kind === "tool") return null;
 		if (item.kind === "notice") rows.push({ kind: "notice", id: item.id, cell: item.cell });
-		else rows.push({ kind: "thinking", id: item.id, cell: item.cell });
+		else rows.push({ kind: item.kind, id: item.id, cell: item.cell });
 	}
 	return rows;
 }
@@ -159,6 +161,71 @@ export function groupTranscriptRows(cells: readonly AgentCell[]): TranscriptRow[
 	}
 
 	return rows.flatMap((row) => (row.kind === "work" ? (unwrapped(row) ?? [row]) : [row]));
+}
+
+/**
+ * Fold each finished turn's whole process — every work group, and the remarks
+ * made between them ("Let me check the config…") — into one group above the
+ * reply that concludes it.
+ *
+ * While a turn runs its steps stay where they landed, since watching them is
+ * the point. Once it is over only the conclusion is still being read, and an
+ * agent that talks between tool calls otherwise leaves it as one more paragraph
+ * in a long run of them. The folded group takes a key of its own, so it mounts
+ * fresh — collapsed — rather than inheriting the open state of the live group.
+ *
+ * A turn that ends without a reply (aborted, or failed mid-tool) is left as it
+ * is: there is no conclusion to set apart, and where it stopped is the news.
+ * So is one that called no tool: its reasoning already folds on its own.
+ */
+export function foldSettledTurns(rows: readonly TranscriptRow[], streaming: boolean): TranscriptRow[] {
+	const out: TranscriptRow[] = [];
+	let turn = "start";
+	let start = 0;
+
+	function flush(end: number, settled: boolean): void {
+		const segment = rows.slice(start, end);
+		const reply = segment[segment.length - 1];
+		const process = segment.slice(0, -1);
+		if (!settled || reply?.kind !== "message" || !process.some((row) => row.kind === "work")) {
+			out.push(...segment);
+			return;
+		}
+		const folded: WorkRow = {
+			kind: "work",
+			id: `turn-${turn}`,
+			items: [],
+			startedAt: Number.POSITIVE_INFINITY,
+			endedAt: itemEnd(reply.cell),
+		};
+		for (const row of process) {
+			if (row.kind === "user") continue;
+			if (row.kind === "work") {
+				folded.items.push(...row.items);
+				folded.startedAt = Math.min(folded.startedAt, row.startedAt);
+				folded.endedAt = Math.max(folded.endedAt, row.endedAt);
+				continue;
+			}
+			folded.items.push(
+				row.kind === "notice"
+					? { kind: "notice", id: row.id, cell: row.cell }
+					: { kind: row.kind, id: row.id, cell: row.cell },
+			);
+			folded.startedAt = Math.min(folded.startedAt, itemStart(row.cell));
+		}
+		out.push(folded, reply);
+	}
+
+	for (let i = 0; i < rows.length; i++) {
+		const row = rows[i];
+		if (row.kind !== "user") continue;
+		flush(i, true);
+		out.push(row);
+		turn = row.id;
+		start = i + 1;
+	}
+	flush(rows.length, !streaming);
+	return out;
 }
 
 /** Tool calls in the group — what a collapsed header reports it is hiding. */
