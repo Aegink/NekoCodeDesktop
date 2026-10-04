@@ -24,6 +24,7 @@ export const BUILTIN_SKILL_NAMES = [
 	"debug-root-cause",
 	"write-tests",
 	"refactor-safely",
+	"nekocode-themes",
 ] as const;
 
 export interface BuiltinSkillFile {

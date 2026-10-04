@@ -114,6 +114,7 @@ import type {
 	SkillImportScan,
 	SkillsSnapshot,
 } from "../../shared/skills";
+import type { CommunityTheme, ThemeLibraryChange, ThemeLibrarySnapshot } from "../../shared/themes";
 import type { AppPreferences, CommandShellOption } from "../../shared/preferences";
 import type { SystemFont } from "../../shared/font-names";
 import type {
@@ -408,6 +409,19 @@ export interface AgentApi {
 	skillsImport(request: ImportSkillsRequest): Promise<ImportSkillsResult | null>;
 	/** Moves an installed skill's folder to the recycle bin. */
 	skillsRemove(request: RemoveSkillRequest): Promise<SkillsSnapshot | null>;
+
+	/** Community themes installed in `~/.nekocode/themes`. */
+	themesList(): Promise<ThemeLibrarySnapshot>;
+	/** Installs a `.codex-theme` package's palette and artwork; replaces one with the same id. */
+	themesInstall(source: string): Promise<CommunityTheme>;
+	/** A theme's background artwork as a data URL; null when it has none. */
+	themesArt(id: string): Promise<string | null>;
+	/** Moves an installed theme to the recycle bin. */
+	themesRemove(id: string): Promise<ThemeLibrarySnapshot>;
+	/** Opens the themes folder in the file manager. */
+	themesOpenDir(): Promise<void>;
+	/** Packages installed from the folder, and anything else that changed there. */
+	onThemesChanged(listener: (change: ThemeLibraryChange) => void): () => void;
 
 	/** Everything ever spent, rolled up from the transcripts on disk. */
 	tokenUsage(): Promise<TokenUsageReport>;

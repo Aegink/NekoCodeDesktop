@@ -134,6 +134,10 @@ export const WEBUI_RPC_METHODS = [
 	"skillsScanImport",
 	"skillsImport",
 	"skillsRemove",
+	"themesList",
+	"themesInstall",
+	"themesArt",
+	"themesRemove",
 	"tokenUsage",
 	"tokenUsageRescan",
 	"tokenUsageExport",
@@ -207,6 +211,7 @@ export const WEBUI_EVENT_CHANNELS = [
 	"automation:event",
 	"memory:changed",
 	"hooks:changed",
+	"themes:changed",
 ] as const;
 
 export type WebUiEventChannel = (typeof WEBUI_EVENT_CHANNELS)[number];

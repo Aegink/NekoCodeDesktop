@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
-import { useTheme } from "../../hooks/useTheme";
+import { useMemo, useRef, useState } from "react";
+import { applyCommunityThemeNow, useTheme } from "../../hooks/useTheme";
+import { installThemePackage, removeCommunityTheme, useThemeLibrary } from "../../hooks/useThemeLibrary";
+import { api, errorMessage } from "../../api";
+import { MAX_THEME_PACKAGE_BYTES, THEME_PACKAGE_EXTENSION, parseThemePackage, type CommunityTheme } from "../../../../shared/themes";
 import { useAppearancePreferences } from "../../hooks/useAppearancePreferences";
 import { useTranslation, type TranslationKey } from "../../i18n";
-import { getAvailableCodeThemes, type ThemeMode, type ThemeVariant } from "../../theme/theme.logic";
+import { getAvailableCodeThemes, parseThemeShareString, type ThemeMode, type ThemeSharePayload, type ThemeVariant } from "../../theme/theme.logic";
 import { WINDOW_MATERIALS, type WindowMaterial } from "../../../../shared/window";
 import { UI_DENSITY_MODES, type UiDensity } from "../../lib/appDensity";
 import { CHAT_WIDTH_MODES, type ChatWidthMode } from "../../lib/chatWidth";
@@ -12,14 +15,16 @@ import {
 	FONT_SIZE_RANGE,
 	MONO_FONT_SIZE_RANGE,
 } from "../../lib/appearancePreferences";
+import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { Menu, MenuGroupLabel, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "../ui/menu";
 import { ComposerPickerMenuPopup } from "../chat/ComposerPickerMenuPopup";
 import { COMPOSER_PICKER_MENU_OPTION_CLASS_NAME, COMPOSER_TOOLBAR_PICKER_TRIGGER_CLASS_NAME } from "../chat/composerPickerStyles";
-import { CheckIcon, ChevronDownIcon, MinusIcon, PlusIcon, RotateCcwIcon, XIcon } from "../../lib/icons";
+import { CheckIcon, ChevronDownIcon, CopyIcon, MinusIcon, PlusIcon, RotateCcwIcon, XIcon } from "../../lib/icons";
 import { FontFamilyPicker } from "./FontFamilyPicker";
+import { SETTINGS_TEXTAREA_CLASS_NAME, SettingsDialog } from "./SettingsDialog";
 import { SettingsRow } from "./SettingsRow";
 
 const MODES: { id: ThemeMode; labelKey: TranslationKey }[] = [
@@ -195,6 +200,262 @@ function AccentPicker({ value, onChange }: { value: string; onChange: (value: st
 	);
 }
 
+/** A swatch that opens the system color picker, with the hex value beside it. */
+function ColorPicker({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+	return (
+		<label className="flex cursor-pointer items-center gap-2">
+			<span className="font-mono text-[length:var(--app-font-size-ui-sm,11px)] text-muted-foreground">{value}</span>
+			<span
+				className="relative size-5 overflow-hidden rounded-full border border-[color:var(--color-border-heavy)]"
+				style={{ backgroundColor: value }}
+			>
+				<input
+					aria-label={label}
+					className="absolute inset-0 cursor-pointer opacity-0"
+					onChange={(event) => onChange(event.currentTarget.value)}
+					type="color"
+					value={value}
+				/>
+			</span>
+		</label>
+	);
+}
+
+/** Reads a pasted share string, or says it is not one. */
+function readThemeShare(value: string): ThemeSharePayload | null {
+	if (!value.trim()) return null;
+	try {
+		return parseThemeShareString(value);
+	} catch {
+		return null;
+	}
+}
+
+/** A `.codex-theme` package, or why it is not one. */
+function readThemePackage(source: string): { theme: CommunityTheme } | { error: string } {
+	try {
+		return { theme: parseThemePackage(source).theme };
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
+function ColorDots({ colors }: { colors: readonly string[] }) {
+	return (
+		<span className="flex shrink-0 gap-1">
+			{colors.map((color, index) => (
+				<span
+					key={index}
+					className="size-3.5 rounded-full border border-[color:var(--color-border-heavy)]"
+					style={{ backgroundColor: color }}
+				/>
+			))}
+		</span>
+	);
+}
+
+/**
+ * Bring a theme in: a share string pasted from this app or Codex, or a
+ * `.codex-theme` package downloaded from codexthemes.ai — of which only the
+ * palette and the artwork are used.
+ */
+function ThemeImportDialog({ onClose, onImport }: { onClose: () => void; onImport: (value: string, variant: ThemeVariant) => void }) {
+	const { t } = useTranslation();
+	const [value, setValue] = useState("");
+	const [file, setFile] = useState<{ name: string; source: string } | null>(null);
+	const [error, setError] = useState<string | null>(null);
+	const [busy, setBusy] = useState(false);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const trimmed = value.trim();
+	const share = !file && trimmed ? readThemeShare(trimmed) : null;
+	const packageSource = file?.source ?? (trimmed.startsWith("{") ? trimmed : null);
+	const pack = useMemo(() => (packageSource ? readThemePackage(packageSource) : null), [packageSource]);
+	const packTheme = pack && "theme" in pack ? pack.theme : null;
+	const invalid =
+		pack && "error" in pack ? pack.error : trimmed && !share && !packageSource ? t("settings.themeImportInvalid") : null;
+	const variantName = (variant: ThemeVariant) => t(variant === "dark" ? "theme.dark" : "theme.light");
+
+	const chooseFile = async (chosen: File | undefined) => {
+		if (!chosen) return;
+		setError(null);
+		if (chosen.size > MAX_THEME_PACKAGE_BYTES) {
+			setError(t("settings.themePackageTooLarge"));
+			return;
+		}
+		const source = await chosen.text();
+		if (source.trim().startsWith("codex-theme-v1:")) {
+			setFile(null);
+			setValue(source.trim());
+		} else {
+			setValue("");
+			setFile({ name: chosen.name, source });
+		}
+	};
+
+	const apply = async () => {
+		setError(null);
+		if (share) {
+			onImport(trimmed, share.variant);
+			onClose();
+			return;
+		}
+		if (!packageSource || !packTheme) return;
+		setBusy(true);
+		try {
+			await installThemePackage(packageSource);
+			onClose();
+		} catch (cause) {
+			setError(errorMessage(cause));
+		} finally {
+			setBusy(false);
+		}
+	};
+
+	return (
+		<SettingsDialog
+			title={t("settings.themeImport")}
+			description={t("settings.themeImportHint")}
+			onClose={onClose}
+			footer={
+				<>
+					<input
+						accept={`${THEME_PACKAGE_EXTENSION},.json,application/json`}
+						className="hidden"
+						onChange={(event) => {
+							void chooseFile(event.currentTarget.files?.[0]);
+							event.currentTarget.value = "";
+						}}
+						ref={fileInput}
+						type="file"
+					/>
+					<Button className="mr-auto" onClick={() => fileInput.current?.click()} size="sm" variant="subtle">
+						{t("settings.themeImportFile")}
+					</Button>
+					<Button onClick={onClose} size="sm" variant="subtle">
+						{t("common.cancel")}
+					</Button>
+					<Button disabled={busy || !(share || packTheme)} onClick={() => void apply()} size="sm">
+						{t("settings.themeImportApply")}
+					</Button>
+				</>
+			}
+		>
+			{file ? (
+				<div className="flex items-center gap-2 rounded-lg border border-[color:var(--color-border)] px-2 py-1.5 text-[length:var(--app-font-size-ui-sm,11px)]">
+					<span className="min-w-0 flex-1 truncate font-mono">{file.name}</span>
+					<Button aria-label={t("common.clear")} onClick={() => setFile(null)} size="icon-chip" variant="ghost">
+						<XIcon />
+					</Button>
+				</div>
+			) : (
+				<textarea
+					aria-label={t("settings.themeImport")}
+					autoFocus
+					className={cn(SETTINGS_TEXTAREA_CLASS_NAME, "h-32")}
+					onChange={(event) => setValue(event.currentTarget.value)}
+					placeholder="codex-theme-v1:{…}"
+					spellCheck={false}
+					value={value}
+				/>
+			)}
+			{error || invalid ? (
+				<p className="text-[length:var(--app-font-size-ui-sm,11px)] text-destructive">{error ?? invalid}</p>
+			) : share ? (
+				<p className="flex items-center gap-2 text-[length:var(--app-font-size-ui-sm,11px)] text-muted-foreground">
+					<ColorDots colors={[share.theme.surface, share.theme.ink, share.theme.accent]} />
+					{t("settings.themeImportTarget", { variant: variantName(share.variant) })}
+					{share.unknownCodeThemeId ? ` ${t("settings.themeImportUnknownCode", { id: share.unknownCodeThemeId })}` : null}
+				</p>
+			) : packTheme ? (
+				<p className="flex items-center gap-2 text-[length:var(--app-font-size-ui-sm,11px)] text-muted-foreground">
+					<ColorDots colors={[packTheme.colors.surface, packTheme.colors.ink, packTheme.colors.accent]} />
+					<span>
+						{t("settings.themePackagePreview", { name: packTheme.name, variant: variantName(packTheme.variant) })}
+						{packTheme.art ? ` ${t("settings.themePackageHasArt")}` : null} {t("settings.themePackageCssNote")}
+					</span>
+				</p>
+			) : null}
+		</SettingsDialog>
+	);
+}
+
+/** The installed community themes: apply one, remove one, or open their folder. */
+function CommunityThemesDialog({ onClose, onImport }: { onClose: () => void; onImport: () => void }) {
+	const { t } = useTranslation();
+	const library = useThemeLibrary();
+	const { themeState } = useTheme();
+	const [error, setError] = useState<string | null>(null);
+	const themes = library?.themes ?? [];
+	return (
+		<SettingsDialog
+			title={t("settings.communityThemes")}
+			description={library?.dir}
+			onClose={onClose}
+			footer={
+				<>
+					{api.runtime === "electron" ? (
+						<Button
+							className="mr-auto"
+							onClick={() => void api.themesOpenDir().catch((cause) => setError(errorMessage(cause)))}
+							size="sm"
+							variant="subtle"
+						>
+							{t("settings.communityThemesOpenDir")}
+						</Button>
+					) : null}
+					<Button onClick={onImport} size="sm" variant="subtle">
+						{t("settings.themeImport")}
+					</Button>
+					<Button onClick={onClose} size="sm">
+						{t("common.close")}
+					</Button>
+				</>
+			}
+		>
+			{themes.length === 0 ? (
+				<p className="text-[length:var(--app-font-size-ui-sm,11px)] text-muted-foreground">{t("settings.communityThemesEmpty")}</p>
+			) : (
+				<div className="flex flex-col divide-y divide-[color:var(--app-surface-divider)]">
+					{themes.map((theme) => {
+						const active = themeState.communityThemeIds[theme.variant] === theme.id;
+						return (
+							<div key={theme.id} className="flex items-center gap-3 py-2">
+								<ColorDots colors={[theme.colors.surface, theme.colors.ink, theme.colors.accent]} />
+								<div className="flex min-w-0 flex-1 flex-col">
+									<span className="truncate text-[length:var(--app-font-size-ui,12px)]">{theme.name}</span>
+									<span className="truncate text-[length:var(--app-font-size-ui-xs,10px)] text-muted-foreground">
+										{[
+											theme.id,
+											t(theme.variant === "dark" ? "theme.dark" : "theme.light"),
+											theme.art ? t("settings.communityThemeArt") : null,
+											theme.author,
+										]
+											.filter(Boolean)
+											.join(" · ")}
+									</span>
+								</div>
+								<Button disabled={active} onClick={() => applyCommunityThemeNow(theme)} size="sm" variant="subtle">
+									{active ? t("settings.communityThemeInUse") : t("settings.communityThemeApply")}
+								</Button>
+								<Button
+									aria-label={t("common.delete")}
+									onClick={() => void removeCommunityTheme(theme.id).catch((cause) => setError(errorMessage(cause)))}
+									size="icon-chip"
+									title={t("common.delete")}
+									variant="ghost"
+								>
+									<XIcon />
+								</Button>
+							</div>
+						);
+					})}
+				</div>
+			)}
+			{error ? <p className="text-[length:var(--app-font-size-ui-sm,11px)] text-destructive">{error}</p> : null}
+		</SettingsDialog>
+	);
+}
+
 export function AppearanceSettings() {
 	const { t } = useTranslation();
 	const {
@@ -211,12 +472,28 @@ export function AppearanceSettings() {
 		supportedWindowMaterials,
 		updateThemePack,
 		resetAllThemes,
+		exportThemeString,
+		importThemeString,
+		communityThemeId,
+		artStrength,
+		setArtStrength,
 	} = useTheme();
+	const library = useThemeLibrary();
+	const communityThemes = library?.themes ?? [];
+	const activeCommunity = communityThemeId ? communityThemes.find((entry) => entry.id === communityThemeId) : undefined;
+	const [managing, setManaging] = useState(false);
 	const { preferences, updatePreferences, resetPreferences } = useAppearancePreferences();
 	const codeThemes = useMemo(() => getAvailableCodeThemes(resolvedTheme), [resolvedTheme]);
 	const activeCodeThemeId = themeState.codeThemeIds[resolvedTheme as ThemeVariant];
 	const [menuOpen, setMenuOpen] = useState(false);
 	const [materialMenuOpen, setMaterialMenuOpen] = useState(false);
+	const [importing, setImporting] = useState(false);
+	const [copied, setCopied] = useState(false);
+	const copyTheme = async () => {
+		await copyText(exportThemeString(resolvedTheme as ThemeVariant));
+		setCopied(true);
+		window.setTimeout(() => setCopied(false), 1500);
+	};
 	// Windows before 11 22H2 (and every other platform) can only paint the opaque
 	// shell; the rest stay listed but unpickable, so the setting explains itself
 	// instead of silently vanishing.
@@ -246,7 +523,8 @@ export function AppearanceSettings() {
 									variant="ghost"
 								>
 									<span className="truncate">
-										{codeThemes.find((option) => option.id === activeCodeThemeId)?.label ??
+										{activeCommunity?.name ??
+											codeThemes.find((option) => option.id === activeCodeThemeId)?.label ??
 											activeCodeThemeId}
 									</span>
 									<ChevronDownIcon className="size-3 opacity-60" />
@@ -258,9 +536,13 @@ export function AppearanceSettings() {
 							    context from MenuRadioGroup, and a label outside one throws as
 							    soon as the menu opens. */}
 							<MenuRadioGroup
-								value={activeCodeThemeId}
+								value={activeCommunity ? `community:${activeCommunity.id}` : activeCodeThemeId}
 								onValueChange={(value) => {
-									setCodeThemeId(resolvedTheme as ThemeVariant, value);
+									const community = value.startsWith("community:")
+										? communityThemes.find((entry) => `community:${entry.id}` === value)
+										: undefined;
+									if (community) applyCommunityThemeNow(community);
+									else setCodeThemeId(resolvedTheme as ThemeVariant, value);
 									setMenuOpen(false);
 								}}
 							>
@@ -274,15 +556,77 @@ export function AppearanceSettings() {
 										{option.label}
 									</MenuRadioItem>
 								))}
+								{communityThemes.length > 0 ? (
+									<MenuGroupLabel>{t("settings.communityThemes")}</MenuGroupLabel>
+								) : null}
+								{/* A community theme is made for one variant; picking one from the
+								    other switches the mode so it can be seen. */}
+								{communityThemes.map((entry) => (
+									<MenuRadioItem
+										key={entry.id}
+										className={COMPOSER_PICKER_MENU_OPTION_CLASS_NAME}
+										value={`community:${entry.id}`}
+									>
+										{entry.name}
+										{entry.variant !== resolvedTheme
+											? ` · ${t(entry.variant === "dark" ? "theme.dark" : "theme.light")}`
+											: null}
+									</MenuRadioItem>
+								))}
 							</MenuRadioGroup>
 						</ComposerPickerMenuPopup>
 					</Menu>
 				</SettingsRow>
 
+				<SettingsRow
+					hint={t("settings.communityThemesHint", { count: communityThemes.length })}
+					label={t("settings.communityThemes")}
+				>
+					<Button onClick={() => setManaging(true)} size="sm" variant="subtle">
+						{t("settings.communityThemesManage")}
+					</Button>
+				</SettingsRow>
+
+				{activeCommunity?.art ? (
+					<SettingsRow hint={t("settings.artStrengthHint")} label={t("settings.artStrength")}>
+						<div className="flex items-center gap-2">
+							<input
+								aria-label={t("settings.artStrength")}
+								className="theme-slider h-1 w-36 cursor-pointer appearance-none rounded-full bg-[color-mix(in_srgb,var(--color-text-foreground)_14%,transparent)]"
+								max={100}
+								min={0}
+								onChange={(event) => setArtStrength(Number(event.currentTarget.value))}
+								step={1}
+								type="range"
+								value={artStrength}
+							/>
+							<span className="w-7 text-right text-[length:var(--app-font-size-ui-sm,11px)] tabular-nums text-muted-foreground">
+								{artStrength}
+							</span>
+						</div>
+					</SettingsRow>
+				) : null}
+
 				<SettingsRow hint={t("settings.accentColorHint", { variant: variantLabel })} label={t("settings.accentColor")}>
 					<AccentPicker
 						onChange={(accent) => updateThemePack(resolvedTheme, { accent })}
 						value={activeTheme.theme.accent}
+					/>
+				</SettingsRow>
+
+				<SettingsRow hint={t("settings.surfaceColorHint", { variant: variantLabel })} label={t("settings.surfaceColor")}>
+					<ColorPicker
+						label={t("settings.surfaceColor")}
+						onChange={(surface) => updateThemePack(resolvedTheme, { surface })}
+						value={activeTheme.theme.surface}
+					/>
+				</SettingsRow>
+
+				<SettingsRow hint={t("settings.inkColorHint", { variant: variantLabel })} label={t("settings.inkColor")}>
+					<ColorPicker
+						label={t("settings.inkColor")}
+						onChange={(ink) => updateThemePack(resolvedTheme, { ink })}
+						value={activeTheme.theme.ink}
 					/>
 				</SettingsRow>
 
@@ -301,6 +645,18 @@ export function AppearanceSettings() {
 						<span className="w-7 text-right text-[length:var(--app-font-size-ui-sm,11px)] tabular-nums text-muted-foreground">
 							{activeTheme.theme.contrast}
 						</span>
+					</div>
+				</SettingsRow>
+
+				<SettingsRow hint={t("settings.themeShareHint", { variant: variantLabel })} label={t("settings.themeShare")}>
+					<div className="flex items-center gap-1.5">
+						<Button onClick={() => void copyTheme()} size="sm" variant="subtle">
+							{copied ? <CheckIcon className="size-3.5" /> : <CopyIcon className="size-3.5" />}
+							{copied ? t("settings.themeCopied") : t("settings.themeCopy")}
+						</Button>
+						<Button onClick={() => setImporting(true)} size="sm" variant="subtle">
+							{t("settings.themeImport")}
+						</Button>
 					</div>
 				</SettingsRow>
 
@@ -492,6 +848,17 @@ export function AppearanceSettings() {
 					</Button>
 				</SettingsRow>
 			</SettingsGroup>
+
+			{importing ? <ThemeImportDialog onClose={() => setImporting(false)} onImport={importThemeString} /> : null}
+			{managing ? (
+				<CommunityThemesDialog
+					onClose={() => setManaging(false)}
+					onImport={() => {
+						setManaging(false);
+						setImporting(true);
+					}}
+				/>
+			) : null}
 		</div>
 	);
 }

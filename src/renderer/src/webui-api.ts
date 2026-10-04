@@ -23,6 +23,7 @@ const SUBSCRIPTIONS = {
 	onAutomationEvent: "automation:event",
 	onMemoryChanged: "memory:changed",
 	onHooksChanged: "hooks:changed",
+	onThemesChanged: "themes:changed",
 } as const satisfies Record<string, WebUiEventChannel>;
 
 export function createWebUiApi(runtime: WebUiRuntime): AgentApi {
@@ -96,6 +97,7 @@ export function createWebUiApi(runtime: WebUiRuntime): AgentApi {
 		qqBotChooseProject: unsupported("WebUI 请使用宿主目录选择器"),
 		webUiStatus: unsupported("请在桌面应用中配置 WebUI"),
 		webUiSave: unsupported("请在桌面应用中配置 WebUI"),
+		themesOpenDir: unsupported("请在桌面应用中打开主题文件夹"),
 		// Installing replaces the host's app; that stays a decision made at the host.
 		updateInstallState: () => Promise.resolve({ phase: "unsupported" }),
 		downloadUpdate: unsupported("请在桌面应用中更新"),

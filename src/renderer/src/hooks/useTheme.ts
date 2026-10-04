@@ -12,8 +12,11 @@ import {
 	type ThemePack,
 	type ThemeState,
 	type ThemeVariant,
+	applyCommunityTheme,
 	areThemePacksEqual,
 	buildThemeCssVariables,
+	forgetCommunityTheme,
+	type CommunityThemeColorsInput,
 	canParseThemeShareString,
 	createThemeShareString,
 	parseStoredThemeState,
@@ -221,6 +224,26 @@ async function setWindowMaterial(material: WindowMaterial) {
 	}
 }
 
+/**
+ * Take a community theme's palette. A community theme is one look for one
+ * variant, so showing it means being in that variant: when the app is in the
+ * other one, the mode follows.
+ */
+export function applyCommunityThemeNow(theme: CommunityThemeColorsInput) {
+	updateStoredThemeState((state) => {
+		const next = applyCommunityTheme(state, theme);
+		return resolveThemeVariant(state.mode, getSystemDark()) === theme.variant ? next : { ...next, mode: theme.variant };
+	});
+}
+
+export function forgetCommunityThemeNow(id: string) {
+	updateStoredThemeState((state) => forgetCommunityTheme(state, id));
+}
+
+function setArtStrength(artStrength: number) {
+	updateStoredThemeState((state) => ({ ...state, artStrength: Math.min(100, Math.max(0, Math.round(artStrength))) }));
+}
+
 function resetThemeVariant(variant: ThemeVariant) {
 	updateStoredThemeState((state) => resetThemeVariantState(state, variant));
 }
@@ -301,6 +324,10 @@ export function useTheme() {
 		setTheme,
 		theme,
 		themeState: snapshot.state,
+		/** The community theme the visible variant's colors came from. */
+		communityThemeId: snapshot.state.communityThemeIds[resolvedTheme],
+		artStrength: snapshot.state.artStrength,
+		setArtStrength,
 		updateThemeFonts,
 		updateThemePack,
 	} as const;

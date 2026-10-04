@@ -79,7 +79,7 @@ import type {
 	SkillSummary,
 	SkillsSnapshot,
 } from "../shared/skills";
-import { createSkill, importSkillFolders, installedSkillFolder, listInstalledSkills, scanSkillSource } from "./user-skills";
+import { createSkill, importSkillFolders, installedSkillFolder, listInstalledSkills, scanSkillSource, skillLoadWarnings } from "./user-skills";
 import type { SlashCommandSummary } from "../shared/commands";
 import {
 	CellProjector,
@@ -577,11 +577,9 @@ export class AgentService {
 				...listInstalledSkills(directories.project, "project"),
 			],
 			directories,
-			// Every diagnostic the loader emits is a problem — a bad frontmatter, a
-			// path that vanished, two skills claiming one name.
-			warnings: (loaded?.diagnostics ?? []).map(
-				(diagnostic) => `${diagnostic.message} — ${diagnostic.path}`,
-			),
+			// A bad frontmatter, a path that vanished, two different skills claiming
+			// one name; one skill installed twice is not a problem.
+			warnings: skillLoadWarnings(loaded?.diagnostics ?? []),
 		};
 	}
 

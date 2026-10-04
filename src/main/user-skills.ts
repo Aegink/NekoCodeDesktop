@@ -231,3 +231,36 @@ export function installedSkillFolder(path: string, directories: Array<string | n
 	const folder = dirname(path);
 	return directories.some((dir) => dir && samePath(dirname(folder), dir)) ? folder : null;
 }
+
+/** What the agent core reports while loading skills; only the fields read here. */
+export interface SkillLoadDiagnostic {
+	type: string;
+	message: string;
+	path?: string;
+	collision?: { name: string; winnerPath: string; loserPath: string };
+}
+
+function sameSkillFile(a: string, b: string): boolean {
+	try {
+		return readFileSync(a, "utf8").replace(/\r\n/g, "\n") === readFileSync(b, "utf8").replace(/\r\n/g, "\n");
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The loader's diagnostics as the settings page words them.
+ *
+ * A skill installed into several agents' directories — `~/.agents/skills` as
+ * well as ours — is the same SKILL.md twice. Only the first copy reaches the
+ * prompt either way, so identical copies are not worth a warning; copies that
+ * differ are, and the warning names the one in use and the one ignored.
+ */
+export function skillLoadWarnings(diagnostics: readonly SkillLoadDiagnostic[]): string[] {
+	return diagnostics.flatMap((diagnostic) => {
+		const collision = diagnostic.collision;
+		if (diagnostic.type !== "collision" || !collision) return [`${diagnostic.message} — ${diagnostic.path ?? ""}`];
+		if (sameSkillFile(collision.winnerPath, collision.loserPath)) return [];
+		return [`技能 "${collision.name}" 重名且内容不同：使用 ${collision.winnerPath}，已忽略 ${collision.loserPath}`];
+	});
+}

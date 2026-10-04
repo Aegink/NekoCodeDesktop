@@ -47,6 +47,21 @@ export interface ThemeState {
   mode: ThemeMode;
   /** Ignore the theme pack's custom UI font and let the native system stack apply. */
   systemUiFont: boolean;
+  /**
+   * The community theme each variant's colors came from, whose artwork shows
+   * behind the chat; null for a built-in palette. Tweaking a color keeps it,
+   * picking a built-in palette or importing a share string clears it.
+   */
+  communityThemeIds: Record<ThemeVariant, string | null>;
+  /** How strongly community artwork shows through its veil, 0–100. */
+  artStrength: number;
+}
+
+/** What applying a community theme needs from it; see `shared/themes`. */
+export interface CommunityThemeColorsInput {
+  id: string;
+  variant: ThemeVariant;
+  colors: { accent: string; surface: string; ink: string; diffAdded: string; diffRemoved: string };
 }
 
 export interface CodeThemeOption {
@@ -59,6 +74,12 @@ export interface ThemeSharePayload {
   codeThemeId: string;
   theme: ChromeTheme;
   variant: ThemeVariant;
+  /**
+   * The syntax theme the string asked for when this app has no such one — a
+   * newer Codex built-in, say. Its colors still import; highlighting falls
+   * back to `codeThemeId`.
+   */
+  unknownCodeThemeId?: string;
 }
 
 export interface ThemeCssVariableBuild {
@@ -278,6 +299,8 @@ export const DEFAULT_THEME_STATE: ThemeState = {
   },
   systemUiFont: true,
   mode: "system",
+  communityThemeIds: { dark: null, light: null },
+  artStrength: 100,
 };
 
 // ─── Theme catalog helpers ────────────────────────────────────────────────
@@ -404,6 +427,54 @@ export function normalizeThemeState(value: unknown): ThemeState {
     // native stack, while an explicit preference always wins after the first save.
     systemUiFont:
       typeof state.systemUiFont === "boolean" ? state.systemUiFont : !hasStoredCustomUiFont(state),
+    communityThemeIds: {
+      dark: normalizeCommunityThemeId(isRecord(state.communityThemeIds) ? state.communityThemeIds.dark : null),
+      light: normalizeCommunityThemeId(isRecord(state.communityThemeIds) ? state.communityThemeIds.light : null),
+    },
+    artStrength: normalizeStoredContrast(state.artStrength, DEFAULT_THEME_STATE.artStrength),
+  };
+}
+
+function normalizeCommunityThemeId(value: unknown): string | null {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(value) ? value : null;
+}
+
+/**
+ * Take a community theme's palette for its variant. Built on the default
+ * palette rather than the current one, so nothing from a previous theme
+ * lingers; the user's own fonts are the exception.
+ */
+export function applyCommunityTheme(state: ThemeState, theme: CommunityThemeColorsInput): ThemeState {
+  const { variant, colors } = theme;
+  const codeThemeId = DEFAULT_THEME_STATE.codeThemeIds[variant];
+  const seed = getCodeThemeSeed(codeThemeId, variant);
+  return {
+    ...state,
+    chromeThemes: {
+      ...state.chromeThemes,
+      [variant]: normalizeChromeTheme(
+        mergeThemeSeedPatch(seed, {
+          accent: colors.accent,
+          surface: colors.surface,
+          ink: colors.ink,
+          fonts: state.chromeThemes[variant].fonts,
+          semanticColors: { diffAdded: colors.diffAdded, diffRemoved: colors.diffRemoved },
+        }),
+        variant,
+      ),
+    },
+    codeThemeIds: { ...state.codeThemeIds, [variant]: codeThemeId },
+    communityThemeIds: { ...state.communityThemeIds, [variant]: theme.id },
+  };
+}
+
+/** Drop a community theme that was uninstalled; its colors stay as they are. */
+export function forgetCommunityTheme(state: ThemeState, id: string): ThemeState {
+  const { dark, light } = state.communityThemeIds;
+  if (dark !== id && light !== id) return state;
+  return {
+    ...state,
+    communityThemeIds: { dark: dark === id ? null : dark, light: light === id ? null : light },
   };
 }
 
@@ -455,16 +526,17 @@ export function parseThemeShareString(rawValue: string): ThemeSharePayload {
   }
 
   const themeShare = parseThemeSharePayload(payload);
-  if (!isCodeThemeAvailable(themeShare.codeThemeId, themeShare.variant)) {
-    throw new Error(
-      `Code theme "${themeShare.codeThemeId}" is not available for ${themeShare.variant}.`,
-    );
-  }
+  // The chrome colors are what a shared theme is; a syntax theme this build
+  // lacks costs only the highlighting, not the import.
+  const known = isCodeThemeAvailable(themeShare.codeThemeId, themeShare.variant);
 
   return {
-    codeThemeId: themeShare.codeThemeId,
+    codeThemeId: known
+      ? themeShare.codeThemeId
+      : DEFAULT_THEME_STATE.codeThemeIds[themeShare.variant],
     theme: normalizeChromeTheme(themeShare.theme, themeShare.variant),
     variant: themeShare.variant,
+    ...(known ? {} : { unknownCodeThemeId: themeShare.codeThemeId }),
   };
 }
 
@@ -506,6 +578,7 @@ export function updateThemePackFromShareString(
       ...state.codeThemeIds,
       [targetVariant]: payload.codeThemeId,
     },
+    communityThemeIds: { ...state.communityThemeIds, [targetVariant]: null },
   };
 }
 
@@ -554,6 +627,7 @@ export function setThemeCodeThemeId(
       ...state.codeThemeIds,
       [variant]: normalized,
     },
+    communityThemeIds: { ...state.communityThemeIds, [variant]: null },
   };
 }
 
@@ -651,6 +725,7 @@ export function resetThemeVariant(state: ThemeState, variant: ThemeVariant): The
       ...state.codeThemeIds,
       [variant]: DEFAULT_THEME_STATE.codeThemeIds[variant],
     },
+    communityThemeIds: { ...state.communityThemeIds, [variant]: null },
   };
 }
 

@@ -9,6 +9,7 @@ import {
 	installedSkillFolder,
 	listInstalledSkills,
 	scanSkillSource,
+	skillLoadWarnings,
 } from "../../src/main/user-skills";
 
 const base = mkdtempSync(join(tmpdir(), "nekocode-skills-"));
@@ -124,5 +125,40 @@ describe("installedSkillFolder", () => {
 		expect(installedSkillFolder(join(user, "mine", "deeper", "SKILL.md"), [user, null])).toBeNull();
 		expect(installedSkillFolder(join(base, "elsewhere", "theirs", "SKILL.md"), [user, null])).toBeNull();
 		expect(installedSkillFolder(join(user, "SKILL.md"), [user])).toBeNull();
+	});
+});
+
+describe("skillLoadWarnings", () => {
+	const collision = (name: string, winnerPath: string, loserPath: string) => ({
+		type: "collision",
+		message: `name "${name}" collision`,
+		path: loserPath,
+		collision: { name, winnerPath, loserPath },
+	});
+
+	test("one skill installed in two agents' directories is not a warning", () => {
+		const ours = join(base, "dup", "nekocode", "ok");
+		const shared = join(base, "dup", "agents", "ok");
+		writeSkill(ours, "name: ok\ndescription: Same.");
+		writeSkill(shared, "name: ok\ndescription: Same.");
+		// Line endings alone do not make two copies different.
+		writeFileSync(join(shared, "SKILL.md"), readFileSync(join(shared, "SKILL.md"), "utf8").replace(/\n/g, "\r\n"));
+		expect(skillLoadWarnings([collision("ok", join(ours, "SKILL.md"), join(shared, "SKILL.md"))])).toEqual([]);
+	});
+
+	test("two different skills under one name name the copy in use", () => {
+		const ours = join(base, "diff", "nekocode", "ok");
+		const shared = join(base, "diff", "agents", "ok");
+		writeSkill(ours, "name: ok\ndescription: Mine.");
+		writeSkill(shared, "name: ok\ndescription: Theirs.");
+		const [warning] = skillLoadWarnings([collision("ok", join(ours, "SKILL.md"), join(shared, "SKILL.md"))]);
+		expect(warning).toContain(`使用 ${join(ours, "SKILL.md")}`);
+		expect(warning).toContain(`已忽略 ${join(shared, "SKILL.md")}`);
+	});
+
+	test("other diagnostics pass through", () => {
+		expect(skillLoadWarnings([{ type: "warning", message: "description is required", path: "/x/SKILL.md" }])).toEqual([
+			"description is required — /x/SKILL.md",
+		]);
 	});
 });

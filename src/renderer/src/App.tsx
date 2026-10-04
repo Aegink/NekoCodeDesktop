@@ -43,6 +43,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { TitleBar } from "./components/TitleBar";
 import { ChatSlot, createChatHost } from "./components/ChatSlot";
+import { CommunityAmbient, CommunityBackground } from "./components/CommunityBackground";
 import { SplitGrid } from "./components/SplitGrid";
 import { useSplitPanes, type PaneSlot } from "./hooks/useSplitPanes";
 import { startResizeDrag } from "./lib/resizeDrag";
@@ -1098,7 +1099,8 @@ export default function App() {
 
 	return (
 		<LinkOpenerContext.Provider value={openLink}>
-		<div className="app-window-backdrop flex h-dvh min-h-0 w-full flex-col overflow-hidden text-foreground">
+		<div className="app-window-backdrop relative flex h-dvh min-h-0 w-full flex-col overflow-hidden text-foreground">
+			<CommunityAmbient />
 			<TitleBar
 				projectLabel={cwd ? projectLabel(cwd, api.homeDir) : null}
 				layoutMode={ideAvailable ? layoutMode : undefined}
@@ -1174,6 +1176,14 @@ export default function App() {
 						dockOpen && "rounded-tr-lg",
 					)}
 				>
+					{view === "chat" ? (
+						<CommunityBackground
+							empty={
+								!panes.split &&
+								(acpActive ? !acp.snapshot || acp.snapshot.cells.length === 0 : (snapshot?.cells.length ?? 0) === 0)
+							}
+						/>
+					) : null}
 					<ViewErrorBoundary resetKey={`${view}:${snapshot?.session.id ?? ""}`}>
 					{view === "settings" ? (
 						<SettingsPage

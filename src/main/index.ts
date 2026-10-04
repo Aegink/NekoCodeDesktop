@@ -31,11 +31,13 @@ import type { TaskBoardEntry } from "../shared/task-board";
 import appIconPng from "../../resources/icons/icon.png?asset";
 import appIconIco from "../../resources/icons/icon.ico?asset";
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, safeStorage, session, shell, utilityProcess } from "electron";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { readdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { AgentService } from "./agent-service";
 import { migrateAgentHome } from "./agent-home";
+import { ThemeLibrary, resolveThemesDir } from "./theme-library";
+import { THEMES_DIR_ENV } from "../shared/themes";
 import { AutomationService } from "./automation/service";
 import { installBrowserGuards } from "./browser-service";
 import type { BrowserInspector } from "./browser-inspector";
@@ -660,6 +662,16 @@ function initialProjectDirectory(): string | null {
  * which material it is sitting on.
  */
 const supportedMaterials = supportedWindowMaterials();
+let themeLibraryInstance: ThemeLibrary | null = null;
+/** Community themes; the folder is watched from startup so the agent can drop packages in. */
+function themeLibrary(): ThemeLibrary {
+	themeLibraryInstance ??= new ThemeLibrary(
+		resolveThemesDir(process.env, process.env.PI_CODING_AGENT_DIR?.trim() || join(app.getPath("home"), ".nekocode", "agent")),
+		(path) => shell.trashItem(path),
+	);
+	return themeLibraryInstance;
+}
+
 let windowMaterialStore: WindowMaterialStore | null = null;
 let activeMaterial: WindowMaterial = "opaque";
 
@@ -1578,6 +1590,19 @@ function registerIpc(): void {
 	ipcMain.handle("hooks:clearRecent", () => hookService().clearRecent());
 
 	ipcMain.handle("skills:list", () => taskManager?.active.skillsSnapshot());
+	ipcMain.handle("themes:list", () => themeLibrary().snapshot());
+	ipcMain.handle("themes:install", (_e, source: string) => {
+		if (typeof source !== "string") throw new Error("主题包内容无效");
+		return themeLibrary().install(source);
+	});
+	ipcMain.handle("themes:art", (_e, id: string) => themeLibrary().art(id));
+	ipcMain.handle("themes:remove", (_e, id: string) => themeLibrary().remove(id));
+	ipcMain.handle("themes:openDir", async () => {
+		const { dir } = themeLibrary();
+		mkdirSync(dir, { recursive: true });
+		const error = await shell.openPath(dir);
+		if (error) throw new Error(error);
+	});
 	ipcMain.handle("skills:setEnabled", (_e, request: SetSkillEnabledRequest) =>
 		taskManager?.active.setSkillEnabled(request),
 	);
@@ -1855,6 +1880,19 @@ app.whenReady().then(async () => {
 		// A failed copy is not a reason to refuse to start — the app comes up on
 		// a fresh home, and the old one is still where it was.
 		console.error("Could not carry the agent home over from ~/.pi/agent:", error);
+	}
+	try {
+		// Watched from now on: the agent's shells inherit the folder's path, and
+		// a package it downloads there is installed and applied without a restart.
+		const themes = themeLibrary();
+		process.env[THEMES_DIR_ENV] = themes.dir;
+		themes.onChange((change) => {
+			for (const window of BrowserWindow.getAllWindows())
+				if (!window.isDestroyed()) window.webContents.send("themes:changed", change);
+		});
+		themes.start();
+	} catch (error) {
+		console.error("Could not watch the community themes folder:", error);
 	}
 	// Before the first provider request: without this the agent core connects
 	// direct regardless of what the rest of the machine is proxied through.

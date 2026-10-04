@@ -213,6 +213,21 @@
      of an opaque blob, plus a 1px ring so stacked/overlapping icons stay
      visually separated. Ring + shadow are one box-shadow so they don't affect
      layout. */
+  /* Under a community theme with artwork the chrome tint is the theme's own
+     surface, thinned so the blurred artwork beneath it (CommunityAmbient) shows
+     as frosted glass instead of the desktop through the window material. The
+     share comes from the artwork-strength setting. */
+  html[data-community-art] .app-chrome-surface,
+  html[data-community-art] .app-titlebar,
+  html[data-community-art] .app-sidebar-surface,
+  html[data-community-art] .sidebar-icon-chip {
+    background: color-mix(
+      in srgb,
+      var(--color-background-surface) var(--community-chrome-tint, 60%),
+      transparent
+    );
+  }
+
   .sidebar-icon-chip {
     background: var(--app-sidebar-surface, var(--card));
     box-shadow:
@@ -3577,6 +3592,13 @@ diffs-container {
     box-shadow 200ms ease-out,
     opacity 200ms ease-out,
     filter 200ms ease-out;
+}
+
+/* A lone pane repeats the chat card's own surface; under a community theme's
+   artwork (see CommunityBackground) that copy would hide it, so it steps aside.
+   Split panes keep theirs — they read as cards on top of the artwork. */
+main:has(> .community-art) .split-grid:not(.split-grid-split) > .split-pane {
+  background: transparent;
 }
 
 .split-grid-split > .split-pane {

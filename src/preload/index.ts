@@ -78,6 +78,7 @@ import type {
 	SkillImportScan,
 	SkillsSnapshot,
 } from "../shared/skills";
+import type { CommunityTheme, ThemeLibraryChange, ThemeLibrarySnapshot } from "../shared/themes";
 import type { AppPreferences, CommandShellOption } from "../shared/preferences";
 import type { SystemFont } from "../shared/font-names";
 import type {
@@ -446,6 +447,12 @@ const api = {
 		ipcRenderer.invoke("skills:scanImport", request),
 	skillsImport: (request: ImportSkillsRequest): Promise<ImportSkillsResult> => ipcRenderer.invoke("skills:import", request),
 	skillsRemove: (request: RemoveSkillRequest): Promise<SkillsSnapshot> => ipcRenderer.invoke("skills:remove", request),
+	themesList: (): Promise<ThemeLibrarySnapshot> => ipcRenderer.invoke("themes:list"),
+	themesInstall: (source: string): Promise<CommunityTheme> => ipcRenderer.invoke("themes:install", source),
+	themesArt: (id: string): Promise<string | null> => ipcRenderer.invoke("themes:art", id),
+	themesRemove: (id: string): Promise<ThemeLibrarySnapshot> => ipcRenderer.invoke("themes:remove", id),
+	themesOpenDir: (): Promise<void> => ipcRenderer.invoke("themes:openDir"),
+	onThemesChanged: (listener: (change: ThemeLibraryChange) => void) => subscribe("themes:changed", listener),
 
 	tokenUsage: (): Promise<TokenUsageReport> => ipcRenderer.invoke("stats:tokens"),
 	tokenUsageRescan: (): Promise<TokenUsageReport> => ipcRenderer.invoke("stats:rescanTokens"),
